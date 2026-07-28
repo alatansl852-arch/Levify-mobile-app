@@ -4,6 +4,7 @@ import {
   Modal, FlatList, TextInput as RNTextInput, Image,
 } from 'react-native';
 import { Text, ActivityIndicator } from 'react-native-paper';
+import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Calendar, DateData } from 'react-native-calendars';
 import { useAuth } from '../../contexts/AuthContext';
@@ -295,8 +296,8 @@ export default function ApplyLeaveScreen({ navigation }: any) {
           <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Leave Type</Text>
-              <TouchableOpacity onPress={() => setDropdownVisible(false)}>
-                <Text style={{ fontSize: 20, color: '#666' }}>✕</Text>
+              <TouchableOpacity onPress={() => setDropdownVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Feather name="x" size={20} color="#666" />
               </TouchableOpacity>
             </View>
             <FlatList
@@ -314,7 +315,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
                       onPress={() => handleSelectLeaveType(type)}
                     >
                       <Text style={[styles.dropdownItemText, leaveType === type && styles.dropdownItemTextSelected]}>{type}</Text>
-                      {leaveType === type && <Text style={{ color: PRIMARY, fontWeight: 'bold' }}>✓</Text>}
+                      {leaveType === type && <Feather name="check" size={16} color={PRIMARY} />}
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -330,8 +331,8 @@ export default function ApplyLeaveScreen({ navigation }: any) {
           <TouchableOpacity activeOpacity={1} style={styles.calendarModalBox} onPress={(e) => e.stopPropagation()}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Leave Dates</Text>
-              <TouchableOpacity onPress={() => setCalendarVisible(false)}>
-                <Text style={{ fontSize: 20, color: '#666' }}>✕</Text>
+              <TouchableOpacity onPress={() => setCalendarVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Feather name="x" size={20} color="#666" />
               </TouchableOpacity>
             </View>
 
@@ -340,7 +341,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
                 <Text style={styles.calendarRangeLabel}>Start</Text>
                 <Text style={styles.calendarRangeValue}>{draftStart ? prettyDate(draftStart) : '—'}</Text>
               </View>
-              <Text style={{ color: '#9CA3AF', fontSize: 16 }}>→</Text>
+              <Feather name="arrow-right" size={16} color="#9CA3AF" />
               <View style={styles.calendarRangeItem}>
                 <Text style={styles.calendarRangeLabel}>End</Text>
                 <Text style={styles.calendarRangeValue}>{draftEnd ? prettyDate(draftEnd) : '—'}</Text>
@@ -385,7 +386,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
           <Text style={styles.label}>Leave Type *</Text>
           <TouchableOpacity style={styles.dropdownTrigger} onPress={() => setDropdownVisible(true)} disabled={loading}>
             <Text style={styles.dropdownTriggerText}>{leaveType}</Text>
-            <Text style={{ color: '#666', fontSize: 16 }}>▼</Text>
+            <Feather name="chevron-down" size={18} color="#666" />
           </TouchableOpacity>
         </View>
 
@@ -412,7 +413,11 @@ export default function ApplyLeaveScreen({ navigation }: any) {
               {leaveLocation === 'within_philippines' && <View style={styles.radioDot} />}
             </View>
             <Text style={styles.radioLabel}>Within Philippines</Text>
-            {leaveLocation === 'within_philippines' && <Text style={{ color: PRIMARY, marginLeft: 'auto', fontWeight: '700' }}>✓</Text>}
+            {leaveLocation === 'within_philippines' && (
+              <View style={{ marginLeft: 'auto' }}>
+                <Feather name="check" size={16} color={PRIMARY} />
+              </View>
+            )}
           </TouchableOpacity>
           <TouchableOpacity style={styles.radioRow} onPress={() => setLeaveLocation('abroad')} disabled={loading}>
             <View style={[styles.radio, leaveLocation === 'abroad' && styles.radioSelected]}>
@@ -426,7 +431,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
         <View style={styles.field}>
           <Text style={styles.label}>Inclusive Dates *</Text>
           <TouchableOpacity style={styles.dateTrigger} onPress={openCalendar} disabled={loading}>
-            <Text style={{ fontSize: 16 }}>📅</Text>
+            <Feather name="calendar" size={18} color={PRIMARY} />
             <Text style={[styles.dateTriggerText, !startDate && { color: '#aaa' }]}>
               {startDate && endDate
                 ? `${prettyDate(startDate)}  →  ${prettyDate(endDate)}`
@@ -467,7 +472,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
         <View style={styles.field}>
           <TouchableOpacity style={styles.checkRow} onPress={() => setMonetizeCredits(!monetizeCredits)} disabled={loading}>
             <View style={[styles.checkbox, monetizeCredits && styles.checkboxChecked]}>
-              {monetizeCredits && <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>✓</Text>}
+              {monetizeCredits && <Feather name="check" size={12} color="#fff" />}
             </View>
             <Text style={styles.checkLabel}>I want to monetize my leave credits</Text>
           </TouchableOpacity>
@@ -526,7 +531,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
                 <View key={i} style={styles.previewItem}>
                   <Image source={{ uri: file.uri }} style={styles.previewImage} resizeMode="cover" />
                   <TouchableOpacity style={styles.removeBtn} onPress={() => setAttachments(attachments.filter((_, idx) => idx !== i))}>
-                    <Text style={styles.removeBtnText}>✕</Text>
+                    <Feather name="x" size={10} color="#fff" />
                   </TouchableOpacity>
                   <Text style={styles.previewName} numberOfLines={1}>{file.name}</Text>
                 </View>
