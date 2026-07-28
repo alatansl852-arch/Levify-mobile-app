@@ -84,15 +84,15 @@ export default function DashboardScreen({ navigation }: any) {
   const openFab = () => {
     setFabOpen(true);
     Animated.parallel([
-      Animated.spring(fabAnim,     { toValue: 1, useNativeDriver: true, friction: 6 }),
-      Animated.timing(overlayAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.timing(fabAnim,     { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.timing(overlayAnim, { toValue: 1, duration: 180, useNativeDriver: true }),
     ]).start();
   };
 
   const closeFab = () => {
     Animated.parallel([
-      Animated.spring(fabAnim,     { toValue: 0, useNativeDriver: true, friction: 6 }),
-      Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(fabAnim,     { toValue: 0, duration: 150, useNativeDriver: true }),
+      Animated.timing(overlayAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
     ]).start(() => setFabOpen(false));
   };
 
@@ -239,7 +239,17 @@ export default function DashboardScreen({ navigation }: any) {
       {/* ── FAB ── */}
       <View style={styles.fabContainer} pointerEvents="box-none">
 
-        {/* Only item: Apply for Leave */}
+        {/* Main FAB Button — rendered FIRST so it sits UNDERNEATH the item */}
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={toggleFab}
+          activeOpacity={0.85}
+          delayLongPress={2000}
+        >
+          <Animated.Text style={[styles.fabIcon, { transform: [{ rotate: fabRotate }] }]}>+</Animated.Text>
+        </TouchableOpacity>
+
+        {/* Apply for Leave item — rendered LAST so it's always ON TOP, even mid-animation */}
         <Animated.View
           style={[styles.fabItem, { opacity: fabAnim, transform: [{ translateY: item1TranslateY }] }]}
           pointerEvents={fabOpen ? 'auto' : 'none'}
@@ -258,16 +268,6 @@ export default function DashboardScreen({ navigation }: any) {
             </View>
           </TouchableOpacity>
         </Animated.View>
-
-        {/* Main FAB Button */}
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={toggleFab}
-          activeOpacity={0.85}
-          delayLongPress={2000}
-        >
-          <Animated.Text style={[styles.fabIcon, { transform: [{ rotate: fabRotate }] }]}>+</Animated.Text>
-        </TouchableOpacity>
 
       </View>
     </View>
@@ -383,6 +383,8 @@ const styles = StyleSheet.create({
   },
   fabItem: {
     position: 'absolute', bottom: 0, right: 0, alignItems: 'flex-end',
+    zIndex: 30,
+    elevation: 10,
   },
   fabItemRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4,
