@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ── CONFIG ─────────────────────────────────────────────────────────────────────
-const BASE_URL = 'https://levify-production.up.railway.app';
+const BASE_URL = 'https://levify.onrender.com';
 
 // ── HELPERS ────────────────────────────────────────────────────────────────────
 const getToken = async (): Promise<string | null> => {
