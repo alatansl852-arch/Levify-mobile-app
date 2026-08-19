@@ -50,12 +50,6 @@ export default function DashboardScreen({ navigation }: any) {
         leaveRequestAPI.getMyApplications().catch(() => []),
       ]);
 
-      // ── DEBUG LOGS (remove after fixing) ──────────────────────────────────
-      console.log('📊 RAW stats:', JSON.stringify(stats));
-      console.log('👤 RAW profile availed:', profileRes?.profile?.total_leave_availed);
-      console.log('✅ Final totalAvailed:', stats?.total_leave_availed ?? profileRes?.profile?.total_leave_availed ?? 0);
-      // ──────────────────────────────────────────────────────────────────────
-
       const profileData = profileRes?.profile ?? null;
       setProfile(profileData);
       if (profileData?.leave_balances) {
@@ -119,12 +113,12 @@ export default function DashboardScreen({ navigation }: any) {
   const sl           = balance?.sick              ?? 0;
   const spl          = balance?.special_privilege ?? 0;
   const fl           = balance?.forced            ?? 0;
-  const totalUsed    = balance?.total_used        ?? 0;
   const pending      = statistics?.pending        ?? 0;
   const totalCredits = profile?.total_leave_credits ?? 0;
   const totalAvailed = statistics?.total_leave_availed ?? profile?.total_leave_availed ?? 0;
   const salaryGrade  = profile?.salary_grade        ?? 'N/A';
   const CARD_W       = (SCREEN_WIDTH - 32 - 12) / 2;
+  const FULL_W       = SCREEN_WIDTH - 32;
 
   return (
     <View style={{ flex: 1 }}>
@@ -147,10 +141,9 @@ export default function DashboardScreen({ navigation }: any) {
           <StatCard label="SICK LEAVE"     value={sl.toFixed(2)} sub="days available" width={CARD_W} />
         </View>
 
-        {/* ── Row 2 ── */}
+        {/* ── Row 2 ── (Total Used card removed — was duplicating Total Leave Availed below) */}
         <View style={styles.row}>
-          <StatCard label="PENDING REQUESTS" value={String(pending)}   sub="awaiting approval" width={CARD_W} accent />
-          <StatCard label="TOTAL USED"       value={String(totalUsed)} sub="days this year"    width={CARD_W} />
+          <StatCard label="PENDING REQUESTS" value={String(pending)} sub="awaiting approval" width={FULL_W} accent />
         </View>
 
         {/* ── Row 3 ── */}
