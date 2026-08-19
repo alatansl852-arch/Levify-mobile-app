@@ -73,6 +73,8 @@ export interface LeaveStatistics {
   total: number;
   total_days_used: number;
   total_leave_availed: number;
+  total_used?: number;       // ✅ added — regular (non-monetized) leave days used
+  total_monetized?: number;  // ✅ added — leave days cashed out via monetization
 }
 
 export interface UserProfile {

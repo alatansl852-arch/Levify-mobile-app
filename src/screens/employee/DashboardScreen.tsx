@@ -109,16 +109,22 @@ export default function DashboardScreen({ navigation }: any) {
     );
   }
 
-  const vl           = balance?.vacation          ?? 0;
-  const sl           = balance?.sick              ?? 0;
-  const spl          = balance?.special_privilege ?? 0;
-  const fl           = balance?.forced            ?? 0;
-  const pending      = statistics?.pending        ?? 0;
-  const totalCredits = profile?.total_leave_credits ?? 0;
-  const totalAvailed = statistics?.total_leave_availed ?? profile?.total_leave_availed ?? 0;
-  const salaryGrade  = profile?.salary_grade        ?? 'N/A';
-  const CARD_W       = (SCREEN_WIDTH - 32 - 12) / 2;
-  const FULL_W       = SCREEN_WIDTH - 32;
+  const vl              = balance?.vacation          ?? 0;
+  const sl               = balance?.sick              ?? 0;
+  const spl              = balance?.special_privilege ?? 0;
+  const fl               = balance?.forced            ?? 0;
+  const pending          = statistics?.pending        ?? 0;
+  const totalCredits     = profile?.total_leave_credits ?? 0;
+
+  // ✅ SPLIT: used and monetized now separate — falls back gracefully if backend
+  // hasn't been updated yet (total_monetized undefined → treated as 0, and
+  // total_used falls back to the old combined field so nothing breaks).
+  const totalUsed        = statistics?.total_used ?? profile?.total_leave_availed ?? 0;
+  const totalMonetized   = statistics?.total_monetized ?? 0;
+
+  const salaryGrade      = profile?.salary_grade ?? 'N/A';
+  const CARD_W            = (SCREEN_WIDTH - 32 - 12) / 2;
+  const FULL_W             = SCREEN_WIDTH - 32;
 
   return (
     <View style={{ flex: 1 }}>
@@ -141,16 +147,21 @@ export default function DashboardScreen({ navigation }: any) {
           <StatCard label="SICK LEAVE"     value={sl.toFixed(2)} sub="days available" width={CARD_W} />
         </View>
 
-        {/* ── Row 2 ── (Total Used card removed — was duplicating Total Leave Availed below) */}
+        {/* ── Row 2 ── */}
         <View style={styles.row}>
           <StatCard label="PENDING REQUESTS" value={String(pending)} sub="awaiting approval" width={FULL_W} accent />
         </View>
 
-        {/* ── Row 3 ── */}
+        {/* ── Row 3a — Credits / Salary Grade ── */}
         <View style={styles.row}>
           <SmallStatCard label="Total Leave Credits" value={totalCredits.toFixed(2)} sub="lifetime credits" />
-          <SmallStatCard label="Total Leave Availed" value={totalAvailed.toFixed(2)} sub="used / monetized" accent />
-          <SmallStatCard label="Salary Grade"        value={`SG-${salaryGrade}`}     sub="current grade" />
+          <SmallStatCard label="Salary Grade"         value={`SG-${salaryGrade}`}    sub="current grade" />
+        </View>
+
+        {/* ── Row 3b — Used / Monetized (split from the old combined card) ── */}
+        <View style={styles.row}>
+          <SmallStatCard label="Total Days Used"      value={totalUsed.toFixed(2)}      sub="regular leave taken"  accent />
+          <SmallStatCard label="Total Days Monetized" value={totalMonetized.toFixed(2)} sub="credits cashed out"   accent />
         </View>
 
         {/* ── Recent Applications ── */}
@@ -210,8 +221,12 @@ export default function DashboardScreen({ navigation }: any) {
             <Text style={styles.subValue}>{totalCredits.toFixed(2)} days</Text>
           </View>
           <View style={styles.subRow}>
-            <Text style={styles.subLabel}>Total Leave Availed / Monetized</Text>
-            <Text style={styles.subValue}>{totalAvailed.toFixed(2)} days</Text>
+            <Text style={styles.subLabel}>Total Days Used</Text>
+            <Text style={styles.subValue}>{totalUsed.toFixed(2)} days</Text>
+          </View>
+          <View style={styles.subRow}>
+            <Text style={styles.subLabel}>Total Days Monetized</Text>
+            <Text style={styles.subValue}>{totalMonetized.toFixed(2)} days</Text>
           </View>
           <View style={styles.subRow}>
             <Text style={styles.subLabel}>Salary Grade</Text>
