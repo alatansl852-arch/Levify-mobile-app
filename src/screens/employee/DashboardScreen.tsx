@@ -161,7 +161,7 @@ export default function DashboardScreen({ navigation }: any) {
         {/* ── Row 3b — Used / Monetized (split from the old combined card) ── */}
         <View style={styles.row}>
           <SmallStatCard label="Total Days Used"      value={totalUsed.toFixed(2)}      sub="regular leave taken"  accent />
-          <SmallStatCard label="Total Days Monetized" value={totalMonetized.toFixed(2)} sub="credits cashed out"   accent />
+          <SmallStatCard label="Total Days Monetized" value={totalMonetized.toFixed(2)} sub="leave credits"   accent />
         </View>
 
         {/* ── Recent Applications ── */}
