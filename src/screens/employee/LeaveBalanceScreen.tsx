@@ -217,35 +217,6 @@ export default function LeaveBalanceScreen() {
             })}
           </View>
 
-          {/* Computation Reference */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Leave Credit Computation Reference</Text>
-            <Text style={styles.cardSub}>
-              Based on CSC guidelines for vacation and sick leave earned per days/months of service
-            </Text>
-
-            <View style={styles.tableHead}>
-              {['No. of Days', 'VAC', 'SICK', 'No. of Months', 'VAC', 'SICK'].map((h, i) => (
-                <Text key={i} style={styles.tableH}>{h}</Text>
-              ))}
-            </View>
-
-            {[
-              { days: '1',  vacD: '0.042', sickD: '0.042', months: '1',  vacM: '1.25',  sickM: '1.25'  },
-              { days: '5',  vacD: '0.208', sickD: '0.208', months: '3',  vacM: '3.75',  sickM: '3.75'  },
-              { days: '10', vacD: '0.417', sickD: '0.417', months: '6',  vacM: '7.50',  sickM: '7.50'  },
-              { days: '15', vacD: '0.625', sickD: '0.625', months: '9',  vacM: '11.25', sickM: '11.25' },
-              { days: '20', vacD: '0.833', sickD: '0.833', months: '12', vacM: '15.00', sickM: '15.00' },
-              { days: '24', vacD: '1.000', sickD: '1.000', months: '-',  vacM: '-',     sickM: '-'     },
-            ].map((row, i) => (
-              <View key={i} style={[styles.tableRow, { backgroundColor: i % 2 === 0 ? '#FDF5F6' : '#fff' }]}>
-                {[row.days, row.vacD, row.sickD, row.months, row.vacM, row.sickM].map((cell, j) => (
-                  <Text key={j} style={styles.tableCell}>{cell}</Text>
-                ))}
-              </View>
-            ))}
-          </View>
-
           <View style={{ height: 32 }} />
         </View>
       </ScrollView>
@@ -376,16 +347,4 @@ const styles = StyleSheet.create({
   progressFill: { height: '100%', borderRadius: 4 },
   overCapText:  { fontSize: 10, color: '#92400E', marginTop: 3, textAlign: 'right' },
   pctText:      { fontSize: 10, color: '#aaa',    marginTop: 3, textAlign: 'right' },
-
-  /* ── Table ── */
-  tableHead: {
-    flexDirection: 'row',
-    borderBottomWidth: 2,
-    borderBottomColor: PRIMARY,
-    paddingBottom: 8,
-    marginBottom: 4,
-  },
-  tableH:    { flex: 1, fontSize: 10, fontWeight: '700', textAlign: 'center', color: PRIMARY },
-  tableRow:  { flexDirection: 'row', paddingVertical: 8, borderRadius: 6 },
-  tableCell: { flex: 1, fontSize: 11, textAlign: 'center', color: '#444' },
 });

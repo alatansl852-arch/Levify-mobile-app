@@ -58,11 +58,6 @@ export default function ProfileScreen() {
     staff:    'STAFF',
   }[role?.toLowerCase()] || role?.toUpperCase());
 
-  const vl  = profile.leave_balances?.vacation          ?? 0;
-  const sl  = profile.leave_balances?.sick              ?? 0;
-  const spl = profile.leave_balances?.special_privilege ?? 0;
-  const fl  = profile.leave_balances?.forced            ?? 0;
-
   return (
     <ScrollView style={styles.container}>
 
@@ -131,15 +126,6 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* ── Leave Balance ── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Leave Balance</Text>
-        <BalanceCard label="Vacation Leave"     value={vl.toFixed(2)}  />
-        <BalanceCard label="Sick Leave"         value={sl.toFixed(2)}  />
-        <BalanceCard label="Special Privilege"  value={spl.toFixed(2)} />
-        <BalanceCard label="Forced Leave"       value={fl.toFixed(2)}  />
-      </View>
-
       {/* ── Logout ── */}
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
         <Text style={styles.logoutText}>Logout</Text>
@@ -147,18 +133,6 @@ export default function ProfileScreen() {
 
       <View style={{ height: 32 }} />
     </ScrollView>
-  );
-}
-
-// ── Balance Card: maroon only ─────────────────────────────────────────────────
-
-function BalanceCard({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.balanceCard}>
-      <Text style={styles.balanceLabel}>{label}</Text>
-      <Text style={styles.balanceValue}>{value}</Text>
-      <Text style={styles.balanceSub}>days available</Text>
-    </View>
   );
 }
 
@@ -199,19 +173,6 @@ const styles = StyleSheet.create({
   infoValue:    { fontSize: 14, color: '#1a1a1a' },
   noteBox:      { backgroundColor: '#F5F5F5', borderRadius: 8, padding: 12, marginTop: 8 },
   noteText:     { fontSize: 12, color: '#888', lineHeight: 18 },
-
-  // ── maroon balance cards ──
-  balanceCard:  {
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    backgroundColor: 'rgba(124,45,58,0.07)',
-    borderLeftWidth: 4,
-    borderLeftColor: PRIMARY,
-  },
-  balanceLabel: { fontSize: 12, color: PRIMARY, fontWeight: '600' },
-  balanceValue: { fontSize: 28, fontWeight: 'bold', marginTop: 4, color: PRIMARY },
-  balanceSub:   { fontSize: 11, color: 'rgba(124,45,58,0.5)', marginTop: 2 },
 
   logoutBtn:  { backgroundColor: PRIMARY, margin: 16, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
   logoutText: { color: '#fff', fontWeight: '700', fontSize: 16 },
