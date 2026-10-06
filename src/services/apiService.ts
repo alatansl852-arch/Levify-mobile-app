@@ -239,6 +239,8 @@ export const leaveRequestAPI = {
 
   applyLeave: async (payload: {
     leave_type: string;
+    // 'within_ph' | 'abroad' — only sent for Vacation Leave (same as the web app).
+    leave_location?: string;
     date_from: string;
     date_to: string;
     days_count: number;
@@ -255,6 +257,9 @@ export const leaveRequestAPI = {
     const token = await getToken();
     const formData = new FormData();
     formData.append('leave_type',  payload.leave_type);
+    if (payload.leave_location) {
+      formData.append('leave_location', payload.leave_location);
+    }
     formData.append('date_from',   payload.date_from);
     formData.append('date_to',     payload.date_to);
     formData.append('days_count',  String(payload.days_count));

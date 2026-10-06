@@ -282,7 +282,8 @@ export default function ApplyLeaveScreen({ navigation }: any) {
   // has actually made a choice (the date rules depend on the type).
   const [leaveType, setLeaveType] = useState('');
   const [otherLeaveType, setOtherLeaveType] = useState('');
-  const [leaveLocation, setLeaveLocation] = useState<'within_philippines' | 'abroad'>('within_philippines');
+  // Same values the web app sends ('within_ph' | 'abroad'). Only used for Vacation Leave.
+  const [leaveLocation, setLeaveLocation] = useState<'within_ph' | 'abroad'>('within_ph');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
@@ -638,6 +639,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
 
       const response = await leaveRequestAPI.applyLeave({
         leave_type: finalLeaveType,
+        leave_location: leaveType === 'Vacation Leave' ? leaveLocation : undefined,
         date_from: startDate,
         date_to: endDate,
         days_count: numberOfDays,
@@ -657,6 +659,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
       if (response.success) {
         Toast.show({ type: 'success', text1: 'Success!', text2: 'Leave application submitted' });
         setLeaveType('');
+        setLeaveLocation('within_ph');
         setOtherLeaveType('');
         setStartDate('');
         setEndDate('');
@@ -818,27 +821,29 @@ export default function ApplyLeaveScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* Leave Location */}
-        <View style={styles.field}>
-          <Text style={styles.label}>Leave Location *</Text>
-          <TouchableOpacity style={styles.radioRow} onPress={() => setLeaveLocation('within_philippines')} disabled={loading}>
-            <View style={[styles.radio, leaveLocation === 'within_philippines' && styles.radioSelected]}>
-              {leaveLocation === 'within_philippines' && <View style={styles.radioDot} />}
-            </View>
-            <Text style={styles.radioLabel}>Within Philippines</Text>
-            {leaveLocation === 'within_philippines' && (
-              <View style={{ marginLeft: 'auto' }}>
-                <Feather name="check" size={16} color={PRIMARY} />
+        {/* Leave Location — Vacation Leave only (same as the web app) */}
+        {leaveType === 'Vacation Leave' && (
+          <View style={styles.field}>
+            <Text style={styles.label}>Leave Location *</Text>
+            <TouchableOpacity style={styles.radioRow} onPress={() => setLeaveLocation('within_ph')} disabled={loading}>
+              <View style={[styles.radio, leaveLocation === 'within_ph' && styles.radioSelected]}>
+                {leaveLocation === 'within_ph' && <View style={styles.radioDot} />}
               </View>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.radioRow} onPress={() => setLeaveLocation('abroad')} disabled={loading}>
-            <View style={[styles.radio, leaveLocation === 'abroad' && styles.radioSelected]}>
-              {leaveLocation === 'abroad' && <View style={styles.radioDot} />}
-            </View>
-            <Text style={styles.radioLabel}>Abroad</Text>
-          </TouchableOpacity>
-        </View>
+              <Text style={styles.radioLabel}>Within Philippines</Text>
+              {leaveLocation === 'within_ph' && (
+                <View style={{ marginLeft: 'auto' }}>
+                  <Feather name="check" size={16} color={PRIMARY} />
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.radioRow} onPress={() => setLeaveLocation('abroad')} disabled={loading}>
+              <View style={[styles.radio, leaveLocation === 'abroad' && styles.radioSelected]}>
+                {leaveLocation === 'abroad' && <View style={styles.radioDot} />}
+              </View>
+              <Text style={styles.radioLabel}>Abroad</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Inclusive Dates — only shown once a leave type has been picked,
             since the rules (min advance days, max duration) depend on it. */}
