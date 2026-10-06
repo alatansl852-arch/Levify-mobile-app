@@ -6,18 +6,57 @@ import {
 import { Text, ActivityIndicator } from 'react-native-paper';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Calendar, DateData } from 'react-native-calendars';
 import { useAuth } from '../../contexts/AuthContext';
 import { leaveRequestAPI, profileAPI } from '../../services/apiService';
+import { computeMonetizationValue, MONETIZATION_CF } from '../../services/salary-utils';
 import Toast from 'react-native-toast-message';
 
 const PRIMARY = '#7C2D3A';
 const BORDER = '#E5E7EB';
 
-// ⚠️ ASSUMPTION: fixed daily rate shown on the web version (₱500).
-// If this should come from the employee's salary grade instead, replace
-// this constant with a value pulled from the API.
-const DAILY_RATE = 500;
+// ---------------------------------------------------------------------------
+// Client-side image compression before upload. iPhone photos (HEIC, high-res)
+// can easily be 8-15MB — this resizes + re-encodes them as JPEG under
+// MAX_FILE_SIZE_BYTES so they never hit the backend's 5MB upload limit.
+// Mirrors the limit enforced on the web ApplyLeavePage.tsx file input.
+// ---------------------------------------------------------------------------
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB — keep in sync with backend multer limit
+const MAX_DIMENSION = 1600; // long-edge resize target; big win for iPhone photos
+
+async function compressImageForUpload(uri: string): Promise<{ uri: string; size: number }> {
+  let quality = 0.8;
+  let result = await ImageManipulator.manipulateAsync(
+    uri,
+    [{ resize: { width: MAX_DIMENSION } }],
+    { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
+  );
+
+  let fileInfo = await FileSystem.getInfoAsync(result.uri);
+
+  // If still too big after resize, keep lowering JPEG quality.
+  while (
+    fileInfo.exists &&
+    fileInfo.size &&
+    fileInfo.size > MAX_FILE_SIZE_BYTES &&
+    quality > 0.3
+  ) {
+    quality -= 0.15;
+    result = await ImageManipulator.manipulateAsync(
+      result.uri,
+      [],
+      { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    fileInfo = await FileSystem.getInfoAsync(result.uri);
+  }
+
+  return {
+    uri: result.uri,
+    size: fileInfo.exists && fileInfo.size ? fileInfo.size : 0,
+  };
+}
 
 const LEAVE_GROUPS = [
   {
@@ -34,12 +73,148 @@ const LEAVE_GROUPS = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Short "at a glance" duration/notice label shown beside each leave type in
+// the dropdown, so users don't have to open a type first to learn its limit.
+// ---------------------------------------------------------------------------
+const LEAVE_TYPE_DURATION_LABELS: Record<string, string> = {
+  'Vacation Leave': '5 days notice',
+  'Sick Leave': 'upon return',
+  'Special Privilege Leave': '3 days',
+  'Mandatory/Forced Leave': '5 days',
+  'Maternity Leave': '105 days',
+  'Paternity Leave': '7 days',
+  'Solo Parent Leave': '7 days',
+  'Study Leave': '6 months',
+  'VAWC Leave': '10 days',
+  'Rehabilitation Leave': '6 months',
+  'Special Emergency Leave': '5 days',
+  'Calamity Leave': '5 days',
+  'Adoption Leave': '—',
+  'Terminal Leave': '—',
+  'Other': '—',
+};
+
+// ---------------------------------------------------------------------------
+// CSC Omnibus Rules on Leave — per-leave-type date constraints.
+// Same rules as the web ApplyLeavePage.tsx. Keyed by the display strings used
+// in LEAVE_GROUPS above (mobile doesn't use the web's LeaveType enum).
+// Each rule drives the Calendar's min/max date and the submit-time
+// validation below. Types not listed fall back to `defaultRule`.
+// ---------------------------------------------------------------------------
+interface LeaveDateRule {
+  /** Must be filed at least this many days before the start date. */
+  minAdvanceDays?: number;
+  /** Max days allowed. Counted in calendar days (end - start + 1) unless maxInWorkingDays is true. */
+  maxDurationDays?: number;
+  /** If true, maxDurationDays counts working days only (Sundays, and Saturdays for staff, are not counted). */
+  maxInWorkingDays?: boolean;
+  /** If true, start/end dates may fall in the past (filed upon/after return). */
+  allowRetroactive?: boolean;
+  /** Short helper text shown under the date picker for this leave type. */
+  note: string;
+}
+
+const defaultRule: LeaveDateRule = {
+  allowRetroactive: false,
+  note: '',
+};
+
+const leaveDateRules: Record<string, LeaveDateRule> = {
+  'Vacation Leave': {
+    minAdvanceDays: 5,
+    allowRetroactive: false,
+    note: 'File at least 5 days before your start date, whenever possible.',
+  },
+  'Sick Leave': {
+    allowRetroactive: true,
+    note: 'File immediately upon your return, or in advance. A medical certificate is required if filed 5+ days in advance, or if the leave exceeds 5 days.',
+  },
+  'Special Privilege Leave': {
+    minAdvanceDays: 7,
+    maxDurationDays: 3,
+    maxInWorkingDays: true,
+    allowRetroactive: false,
+    note: 'File at least 1 week before availment. Maximum of 3 working days.',
+  },
+  'Mandatory/Forced Leave': {
+    maxDurationDays: 5,
+    maxInWorkingDays: true,
+    allowRetroactive: false,
+    note: 'Mandatory 5-day annual vacation leave, scheduled within the year.',
+  },
+  'Maternity Leave': {
+    maxDurationDays: 105,
+    allowRetroactive: false,
+    note: 'Up to 105 days. File in advance with proof of pregnancy (ultrasound/doctor\u2019s certificate).',
+  },
+  'Paternity Leave': {
+    maxDurationDays: 7,
+    maxInWorkingDays: true,
+    allowRetroactive: false,
+    note: 'Up to 7 working days. Requires proof of child\u2019s delivery (birth certificate, medical certificate, marriage contract).',
+  },
+  'Solo Parent Leave': {
+    minAdvanceDays: 5,
+    maxDurationDays: 7,
+    maxInWorkingDays: true,
+    allowRetroactive: false,
+    note: 'File at least 5 days in advance, with updated Solo Parent ID. Up to 7 working days.',
+  },
+  'Study Leave': {
+    maxDurationDays: 180,
+    allowRetroactive: false,
+    note: 'Up to 6 months, subject to agency requirements and an agency-employee contract.',
+  },
+  'VAWC Leave': {
+    maxDurationDays: 10,
+    maxInWorkingDays: true,
+    allowRetroactive: true,
+    note: 'Up to 10 working days. May be filed in advance or immediately upon your return.',
+  },
+  'Rehabilitation Leave': {
+    maxDurationDays: 180,
+    allowRetroactive: false,
+    note: 'Up to 6 months. File within 1 week of the accident, unless a longer period is warranted.',
+  },
+  'Special Emergency Leave': {
+    maxDurationDays: 5,
+    maxInWorkingDays: true,
+    allowRetroactive: false,
+    note: 'Up to 5 working days (straight or staggered) within 30 days of the calamity.',
+  },
+  'Calamity Leave': {
+    maxDurationDays: 5,
+    maxInWorkingDays: true,
+    allowRetroactive: false,
+    note: 'Up to 5 working days (straight or staggered) within 30 days of the calamity.',
+  },
+  'Adoption Leave': {
+    allowRetroactive: false,
+    note: 'Requires an authenticated Pre-Adoptive Placement Authority (DSWD).',
+  },
+  'Terminal Leave': {
+    allowRetroactive: false,
+    note: 'Requires proof of resignation, retirement, or separation from service.',
+  },
+  'Other': {
+    allowRetroactive: true,
+    note: '',
+  },
+};
+
 // Helper: format a Date object as YYYY-MM-DD (local, not UTC-shifted)
 const toDateString = (d: Date) => {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+};
+
+/** Parses a yyyy-mm-dd string as a local-time Date (no UTC shift). */
+const parseLocalDate = (dateStr: string): Date => {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
 };
 
 // Helper: pretty display e.g. "Jul 14, 2026"
@@ -49,22 +224,83 @@ const prettyDate = (dateStr: string) => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+/** Adds `days` to a yyyy-mm-dd string and returns a yyyy-mm-dd string, entirely in local time. */
+const addDaysToDateString = (dateStr: string, days: number) => {
+  const d = parseLocalDate(dateStr);
+  d.setDate(d.getDate() + days);
+  return toDateString(d);
+};
+
+/**
+ * Sundays are never working days. Saturdays are non-working for staff, but
+ * count as working days for faculty (they have Friday/Saturday classes).
+ */
+const isWorkingDay = (date: Date, isFaculty: boolean): boolean => {
+  const day = date.getDay();
+  if (day === 0) return false;
+  if (day === 6) return isFaculty;
+  return true;
+};
+
+/** Counts working days between two yyyy-mm-dd strings, inclusive. */
+const calculateWorkingDays = (startDateStr: string, endDateStr: string, isFaculty: boolean): number => {
+  if (!startDateStr || !endDateStr) return 0;
+  const start = parseLocalDate(startDateStr);
+  const end = parseLocalDate(endDateStr);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) return 0;
+  let count = 0;
+  const current = new Date(start);
+  while (current <= end) {
+    if (isWorkingDay(current, isFaculty)) count++;
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
+};
+
+/** Returns the date (yyyy-mm-dd) of the Nth working day, counting `startStr` as day 1 if it is a working day. */
+const nthWorkingDayFrom = (startStr: string, n: number, isFaculty: boolean): string => {
+  const d = parseLocalDate(startStr);
+  let count = isWorkingDay(d, isFaculty) ? 1 : 0;
+  while (count < n) {
+    d.setDate(d.getDate() + 1);
+    if (isWorkingDay(d, isFaculty)) count++;
+  }
+  return toDateString(d);
+};
+
+/** Formats a number as pesos with two decimals, e.g. 719.23 -> "₱719.23". */
+const formatPeso = (amount: number): string => {
+  const fixed = (Number(amount) || 0).toFixed(2);
+  const [whole, decimals] = fixed.split('.');
+  return `₱${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${decimals}`;
+};
+
 export default function ApplyLeaveScreen({ navigation }: any) {
   const { user } = useAuth();
 
-  const [leaveType, setLeaveType] = useState('Vacation Leave');
+  // Leave type starts unselected so Inclusive Dates only appear once the user
+  // has actually made a choice (the date rules depend on the type).
+  const [leaveType, setLeaveType] = useState('');
   const [otherLeaveType, setOtherLeaveType] = useState('');
   const [leaveLocation, setLeaveLocation] = useState<'within_philippines' | 'abroad'>('within_philippines');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [daysCount, setDaysCount] = useState('');
   const [reason, setReason] = useState('');
   const [monetizeCredits, setMonetizeCredits] = useState(false);
-  const [monetizeDays, setMonetizeDays] = useState('1');
-  const [maxMonetizable, setMaxMonetizable] = useState<number | null>(null);
+  const [monetizationVlDays, setMonetizationVlDays] = useState('');
+  const [monetizationSlDays, setMonetizationSlDays] = useState('');
+  // Loaded from the profile on mount.
+  const [balanceVl, setBalanceVl] = useState<number | null>(null);
+  const [balanceSl, setBalanceSl] = useState<number | null>(null);
+  const [monthlySalary, setMonthlySalary] = useState<number | null>(null);
+  const [profileEmployeeType, setProfileEmployeeType] = useState('');
   const [attachments, setAttachments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
+  // True while picked photos are being resized/compressed, before they
+  // land in `attachments`. Disables the upload box + shows a status line
+  // so the user doesn't tap again mid-compress.
+  const [compressing, setCompressing] = useState(false);
 
   // --- Calendar picker state ---
   const [calendarVisible, setCalendarVisible] = useState(false);
@@ -72,39 +308,96 @@ export default function ApplyLeaveScreen({ navigation }: any) {
   const [draftStart, setDraftStart] = useState('');
   const [draftEnd, setDraftEnd] = useState('');
 
-  useEffect(() => {
-    if (startDate && endDate) {
-      try {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end >= start) {
-          const diff = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-          setDaysCount(diff.toString());
-        }
-      } catch {}
-    } else {
-      setDaysCount('');
-    }
-  }, [startDate, endDate]);
+  // Faculty have Friday/Saturday classes, so Saturday counts as a working day for them.
+  // The backend may label them 'faculty' or 'teaching'.
+  const employeeTypeValue = (profileEmployeeType || (user as any)?.employeeType || '').toLowerCase();
+  const isFaculty = employeeTypeValue === 'faculty' || employeeTypeValue === 'teaching';
 
-  // Fetch vacation leave balance to show "Maximum monetizable" when the
-  // monetization panel is opened. Uses profileAPI.getProfile() since that's
-  // where leave_balances.vacation already lives — no separate balance
-  // endpoint exists on leaveRequestAPI.
+  // CSC date rule for the currently selected leave type.
+  const dateRule = leaveType ? (leaveDateRules[leaveType] ?? defaultRule) : defaultRule;
+
+  // Built from local calendar fields (no UTC round-trip), so it can't
+  // drift a day depending on timezone/time-of-day.
+  const todayStr = toDateString(new Date());
+
+  // Earliest selectable start date for this leave type.
+  // Today is allowed; yesterday and earlier are blocked (unless the leave type
+  // is filed upon/after return, e.g. Sick Leave).
+  const minStartDate = dateRule.allowRetroactive
+    ? undefined
+    : dateRule.minAdvanceDays
+      ? addDaysToDateString(todayStr, dateRule.minAdvanceDays)
+      : todayStr;
+
+  // Working days in the picked range (used for balance deduction).
+  const numberOfDays = startDate && endDate ? calculateWorkingDays(startDate, endDate, isFaculty) : 0;
+  const daysCount = numberOfDays > 0 ? String(numberOfDays) : '';
+
+  // Inclusive calendar-day span (end - start + 1).
+  const calendarDays = startDate && endDate
+    ? Math.round((parseLocalDate(endDate).getTime() - parseLocalDate(startDate).getTime()) / 86400000) + 1
+    : 0;
+
+  const isWeekendOnlyRange = !!startDate && !!endDate && numberOfDays === 0;
+
+  // Days counted against this leave type's max duration (working days or calendar days).
+  const countedDays = dateRule.maxInWorkingDays ? numberOfDays : calendarDays;
+  const durationUnit = dateRule.maxInWorkingDays ? 'working' : 'calendar';
+
+  // Last selectable end date for a given start date, if the leave type has a max duration.
+  const getMaxEndDate = (start: string): string | undefined => {
+    if (!dateRule.maxDurationDays || !start) return undefined;
+    return dateRule.maxInWorkingDays
+      ? nthWorkingDayFrom(start, dateRule.maxDurationDays, isFaculty)
+      : addDaysToDateString(start, dateRule.maxDurationDays - 1);
+  };
+
+  // Clear the picked dates whenever the leave type changes so a stale
+  // selection from a previous type (e.g. a 90-day range picked under
+  // "Study Leave") can't linger as invalid under the newly selected type.
   useEffect(() => {
-    if (!monetizeCredits || maxMonetizable !== null) return;
+    setStartDate('');
+    setEndDate('');
+  }, [leaveType]);
+
+  // Load the leave balances (for the VL/SL monetization limits), the employee
+  // type (Saturday rule) and the monthly salary (monetization estimate).
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const res = await profileAPI.getProfile();
-        if (res?.success && res.profile?.leave_balances?.vacation != null) {
-          setMaxMonetizable(res.profile.leave_balances.vacation);
+        if (cancelled || !res?.success || !res.profile) return;
+        const p = res.profile;
+        setBalanceVl(p.leave_balances?.vacation ?? null);
+        setBalanceSl(p.leave_balances?.sick ?? null);
+        setProfileEmployeeType(p.employee_type ?? '');
+
+        let salary = Number(p.monthly_salary) || 0;
+        if (!salary) {
+          salary = (await profileAPI.getMonthlySalary(p.employee_id)) ?? 0;
         }
+        if (!cancelled) setMonthlySalary(salary > 0 ? salary : null);
       } catch (error) {
-        // Non-fatal — panel still works without the max-days hint.
-        console.log('Could not fetch balance for monetization hint:', error);
+        // Non-fatal — the form still works without the hints/estimate.
+        console.log('Could not load profile for Apply Leave:', error);
       }
     })();
-  }, [monetizeCredits]);
+    return () => { cancelled = true; };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Monetization estimate — MSU HRDO / CSC-DBM formula:
+  //   Salary x No. of days to be monetized x 0.0481927
+  // Same helper as the web app (salary-utils), so both match.
+  // ---------------------------------------------------------------------------
+  const hasSalaryData = !!monthlySalary && monthlySalary > 0;
+  const vlDays = parseFloat(monetizationVlDays) || 0;
+  const slDays = parseFloat(monetizationSlDays) || 0;
+  const totalMonetizationDays = monetizeCredits ? vlDays + slDays : 0;
+  const estimatedAmount = totalMonetizationDays > 0
+    ? computeMonetizationValue(monthlySalary, totalMonetizationDays)
+    : 0;
 
   const handleSelectLeaveType = (type: string) => {
     setLeaveType(type);
@@ -148,8 +441,8 @@ export default function ApplyLeaveScreen({ navigation }: any) {
         textColor: '#fff',
       };
     } else if (draftStart && draftEnd) {
-      let current = new Date(draftStart + 'T00:00:00');
-      const end = new Date(draftEnd + 'T00:00:00');
+      const current = parseLocalDate(draftStart);
+      const end = parseLocalDate(draftEnd);
       while (current <= end) {
         const dateStr = toDateString(current);
         marks[dateStr] = {
@@ -174,8 +467,39 @@ export default function ApplyLeaveScreen({ navigation }: any) {
       Toast.show({ type: 'error', text1: 'Missing Date', text2: 'Please select a start date' });
       return;
     }
+
+    // CSC advance-notice check (skip for leave types filed upon/after return)
+    if (!dateRule.allowRetroactive && minStartDate && draftStart < minStartDate) {
+      Toast.show({
+        type: 'error',
+        text1: 'Advance Notice Required',
+        text2: dateRule.minAdvanceDays
+          ? `${leaveType} must be filed at least ${dateRule.minAdvanceDays} day(s) before the start date.`
+          : `${leaveType} cannot be backdated.`,
+      });
+      return;
+    }
+
+    const finalEnd = draftEnd || draftStart;
+    const draftCalendarDays = Math.round(
+      (parseLocalDate(finalEnd).getTime() - parseLocalDate(draftStart).getTime()) / 86400000
+    ) + 1;
+    const draftCounted = dateRule.maxInWorkingDays
+      ? calculateWorkingDays(draftStart, finalEnd, isFaculty)
+      : draftCalendarDays;
+
+    // CSC max-duration check
+    if (dateRule.maxDurationDays && draftCounted > dateRule.maxDurationDays) {
+      Toast.show({
+        type: 'error',
+        text1: 'Duration Exceeds Limit',
+        text2: `${leaveType} is limited to ${dateRule.maxDurationDays} ${dateRule.maxInWorkingDays ? 'working ' : ''}day(s). You selected ${draftCounted}.`,
+      });
+      return;
+    }
+
     setStartDate(draftStart);
-    setEndDate(draftEnd || draftStart);
+    setEndDate(finalEnd);
     setCalendarVisible(false);
   };
 
@@ -193,46 +517,113 @@ export default function ApplyLeaveScreen({ navigation }: any) {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsMultipleSelection: true,
-        quality: 0.8,
+        quality: 1, // grab full quality here — we compress ourselves right after
         selectionLimit: 5 - attachments.length,
       });
-      if (!result.canceled && result.assets) {
-        if (attachments.length + result.assets.length > 5) {
-          Toast.show({ type: 'error', text1: 'Too Many Files', text2: 'Maximum 5 files allowed' });
-          return;
-        }
-        const newFiles = result.assets.map(asset => ({
-          uri: asset.uri,
-          name: asset.fileName || `photo_${Date.now()}.jpg`,
-          size: asset.fileSize || 0,
-          mimeType: asset.mimeType || 'image/jpeg',
-        }));
-        setAttachments([...attachments, ...newFiles]);
-        Toast.show({ type: 'success', text1: 'Photos Added', text2: `${result.assets.length} photo(s) added` });
+      if (result.canceled || !result.assets) return;
+
+      if (attachments.length + result.assets.length > 5) {
+        Toast.show({ type: 'error', text1: 'Too Many Files', text2: 'Maximum 5 files allowed' });
+        return;
+      }
+
+      // Compress each picked photo (resize + re-encode) so none exceed the
+      // backend's 5MB limit — iPhone photos especially can start well above that.
+      setCompressing(true);
+      try {
+        const compressedFiles = await Promise.all(
+          result.assets.map(async (asset) => {
+            const { uri, size } = await compressImageForUpload(asset.uri);
+            return {
+              uri,
+              name: asset.fileName || `photo_${Date.now()}.jpg`,
+              size,
+              mimeType: 'image/jpeg', // compression always re-encodes to JPEG
+            };
+          })
+        );
+        setAttachments(prev => [...prev, ...compressedFiles]);
+        Toast.show({ type: 'success', text1: 'Photos Added', text2: `${compressedFiles.length} photo(s) added` });
+      } catch (compressError) {
+        console.log('Compression error:', compressError);
+        Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to process photo(s). Please try again.' });
+      } finally {
+        setCompressing(false);
       }
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to open photo library' });
+      setCompressing(false);
     }
   };
 
   const validateForm = (): boolean => {
+    if (!leaveType) { Toast.show({ type: 'error', text1: 'Missing Field', text2: 'Please select a leave type' }); return false; }
     if (!startDate) { Toast.show({ type: 'error', text1: 'Missing Field', text2: 'Please select a start date' }); return false; }
     if (!endDate) { Toast.show({ type: 'error', text1: 'Missing Field', text2: 'Please select an end date' }); return false; }
-    if (!daysCount || parseInt(daysCount) <= 0) { Toast.show({ type: 'error', text1: 'Invalid Days', text2: 'Please select a valid date range' }); return false; }
-    if (!reason.trim()) { Toast.show({ type: 'error', text1: 'Missing Field', text2: 'Please enter reason for leave' }); return false; }
-    if (leaveType === 'Other' && !otherLeaveType.trim()) { Toast.show({ type: 'error', text1: 'Missing Field', text2: 'Please specify the leave type' }); return false; }
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate);
     if (isNaN(start.getTime()) || isNaN(end.getTime())) { Toast.show({ type: 'error', text1: 'Invalid Date', text2: 'Please select valid dates' }); return false; }
     if (end < start) { Toast.show({ type: 'error', text1: 'Invalid Date Range', text2: 'End date must be after start date' }); return false; }
+
+    // Start and end dates must fall on a working day
+    if (!isWorkingDay(start, isFaculty) || !isWorkingDay(end, isFaculty)) {
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid Date Selected',
+        text2: isFaculty
+          ? 'Sundays are non-working days. Please choose a different date.'
+          : 'Saturdays and Sundays are non-working days. Please choose a different date.',
+      });
+      return false;
+    }
+
+    if (numberOfDays <= 0) {
+      Toast.show({
+        type: 'error',
+        text1: 'No Working Days',
+        text2: 'Selected dates contain no working days. Please choose a different range.',
+      });
+      return false;
+    }
+
+    if (!reason.trim()) { Toast.show({ type: 'error', text1: 'Missing Field', text2: 'Please enter reason for leave' }); return false; }
+    if (leaveType === 'Other' && !otherLeaveType.trim()) { Toast.show({ type: 'error', text1: 'Missing Field', text2: 'Please specify the leave type' }); return false; }
+
+    // CSC advance-notice check (skip for leave types filed upon/after return)
+    if (!dateRule.allowRetroactive && minStartDate && startDate < minStartDate) {
+      Toast.show({
+        type: 'error',
+        text1: 'Advance Notice Required',
+        text2: dateRule.minAdvanceDays
+          ? `${leaveType} must be filed at least ${dateRule.minAdvanceDays} day(s) before the start date.`
+          : `${leaveType} cannot be backdated.`,
+      });
+      return false;
+    }
+
+    // CSC max-duration check
+    if (dateRule.maxDurationDays && countedDays > dateRule.maxDurationDays) {
+      Toast.show({
+        type: 'error',
+        text1: 'Duration Exceeds Limit',
+        text2: `${leaveType} is limited to ${dateRule.maxDurationDays} ${dateRule.maxInWorkingDays ? 'working ' : ''}day(s). You selected ${countedDays}.`,
+      });
+      return false;
+    }
+
+    // Validate the VL / SL days to monetize (both may be monetized)
     if (monetizeCredits) {
-      const days = parseInt(monetizeDays);
-      if (!monetizeDays || isNaN(days) || days <= 0) {
-        Toast.show({ type: 'error', text1: 'Invalid Days', text2: 'Enter a valid number of days to monetize' });
+      if (vlDays < 0 || slDays < 0 || vlDays + slDays <= 0) {
+        Toast.show({ type: 'error', text1: 'Invalid Days', text2: 'Enter the number of VL or SL days to monetize' });
         return false;
       }
-      if (maxMonetizable !== null && days > maxMonetizable) {
-        Toast.show({ type: 'error', text1: 'Exceeds Balance', text2: `Maximum monetizable is ${maxMonetizable} day(s)` });
+      if (balanceVl !== null && vlDays > balanceVl) {
+        Toast.show({ type: 'error', text1: 'Not Enough Vacation Leave Credits', text2: `You can monetize at most ${balanceVl.toFixed(2)} VL day(s).` });
+        return false;
+      }
+      if (balanceSl !== null && slDays > balanceSl) {
+        Toast.show({ type: 'error', text1: 'Not Enough Sick Leave Credits', text2: `You can monetize at most ${balanceSl.toFixed(2)} SL day(s).` });
         return false;
       }
     }
@@ -249,10 +640,12 @@ export default function ApplyLeaveScreen({ navigation }: any) {
         leave_type: finalLeaveType,
         date_from: startDate,
         date_to: endDate,
-        days_count: parseInt(daysCount),
+        days_count: numberOfDays,
         reason: reason.trim(),
         monetize_credits: monetizeCredits,
-        monetize_days: monetizeCredits ? parseInt(monetizeDays) : undefined,
+        monetize_days: monetizeCredits ? totalMonetizationDays : undefined,
+        monetization_vl_days: monetizeCredits ? vlDays : 0,
+        monetization_sl_days: monetizeCredits ? slDays : 0,
         commutation_requested: false,
         attachments: attachments.map(file => ({
           uri: file.uri,
@@ -263,15 +656,14 @@ export default function ApplyLeaveScreen({ navigation }: any) {
 
       if (response.success) {
         Toast.show({ type: 'success', text1: 'Success!', text2: 'Leave application submitted' });
-        setLeaveType('Vacation Leave');
+        setLeaveType('');
         setOtherLeaveType('');
         setStartDate('');
         setEndDate('');
-        setDaysCount('');
         setReason('');
         setMonetizeCredits(false);
-        setMonetizeDays('1');
-        setMaxMonetizable(null);
+        setMonetizationVlDays('');
+        setMonetizationSlDays('');
         setAttachments([]);
         setTimeout(() => navigation.navigate('Main'), 1500);
       } else {
@@ -284,8 +676,12 @@ export default function ApplyLeaveScreen({ navigation }: any) {
     }
   };
 
-  const monetizeDaysNum = parseInt(monetizeDays) || 0;
-  const estimatedAmount = monetizeDaysNum * DAILY_RATE;
+  // Calendar's own bounds. Sundays (and Saturdays for staff) can't be tapped.
+  // `maxDate` narrows once a start date is drafted, since the max duration
+  // counts from whichever start the user picks.
+  const calendarMinDate = minStartDate || undefined;
+  const calendarMaxDate = draftStart && !draftEnd ? getMaxEndDate(draftStart) : undefined;
+  const disabledDaysIndexes = isFaculty ? [0] : [0, 6];
 
   return (
     <ScrollView style={styles.container}>
@@ -314,7 +710,10 @@ export default function ApplyLeaveScreen({ navigation }: any) {
                       style={[styles.dropdownItem, leaveType === type && styles.dropdownItemSelected]}
                       onPress={() => handleSelectLeaveType(type)}
                     >
-                      <Text style={[styles.dropdownItemText, leaveType === type && styles.dropdownItemTextSelected]}>{type}</Text>
+                      <View style={styles.dropdownItemTextRow}>
+                        <Text style={[styles.dropdownItemText, leaveType === type && styles.dropdownItemTextSelected]}>{type}</Text>
+                        <Text style={styles.dropdownItemDuration}>{LEAVE_TYPE_DURATION_LABELS[type]}</Text>
+                      </View>
                       {leaveType === type && <Feather name="check" size={16} color={PRIMARY} />}
                     </TouchableOpacity>
                   ))}
@@ -348,9 +747,21 @@ export default function ApplyLeaveScreen({ navigation }: any) {
               </View>
             </View>
 
+            {dateRule.note ? (
+              <Text style={styles.calendarRuleNote}>{dateRule.note}</Text>
+            ) : null}
+            <Text style={styles.calendarRuleNote}>
+              {isFaculty
+                ? 'Sundays are non-working days and cannot be selected.'
+                : 'Saturdays and Sundays are non-working days and cannot be selected.'}
+            </Text>
+
             <Calendar
-              current={draftStart || undefined}
-              minDate={toDateString(new Date())}
+              current={draftStart || minStartDate || undefined}
+              minDate={calendarMinDate}
+              maxDate={calendarMaxDate}
+              disabledDaysIndexes={disabledDaysIndexes}
+              disableAllTouchEventsForDisabledDays
               onDayPress={handleDayPress}
               markingType="period"
               markedDates={getMarkedDates()}
@@ -385,7 +796,9 @@ export default function ApplyLeaveScreen({ navigation }: any) {
         <View style={styles.field}>
           <Text style={styles.label}>Leave Type *</Text>
           <TouchableOpacity style={styles.dropdownTrigger} onPress={() => setDropdownVisible(true)} disabled={loading}>
-            <Text style={styles.dropdownTriggerText}>{leaveType}</Text>
+            <Text style={[styles.dropdownTriggerText, !leaveType && { color: '#aaa' }]}>
+              {leaveType || 'Select a leave type'}
+            </Text>
             <Feather name="chevron-down" size={18} color="#666" />
           </TouchableOpacity>
         </View>
@@ -427,30 +840,51 @@ export default function ApplyLeaveScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
 
-        {/* Inclusive Dates — now opens the calendar picker */}
-        <View style={styles.field}>
-          <Text style={styles.label}>Inclusive Dates *</Text>
-          <TouchableOpacity style={styles.dateTrigger} onPress={openCalendar} disabled={loading}>
-            <Feather name="calendar" size={18} color={PRIMARY} />
-            <Text style={[styles.dateTriggerText, !startDate && { color: '#aaa' }]}>
-              {startDate && endDate
-                ? `${prettyDate(startDate)}  →  ${prettyDate(endDate)}`
-                : 'Select start and end date'}
+        {/* Inclusive Dates — only shown once a leave type has been picked,
+            since the rules (min advance days, max duration) depend on it. */}
+        {leaveType ? (
+          <View style={styles.field}>
+            <Text style={styles.label}>Inclusive Dates *</Text>
+            <TouchableOpacity style={styles.dateTrigger} onPress={openCalendar} disabled={loading}>
+              <Feather name="calendar" size={18} color={PRIMARY} />
+              <Text style={[styles.dateTriggerText, !startDate && { color: '#aaa' }]}>
+                {startDate && endDate
+                  ? `${prettyDate(startDate)}  →  ${prettyDate(endDate)}`
+                  : 'Select start and end date'}
+              </Text>
+            </TouchableOpacity>
+            {dateRule.note ? (
+              <Text style={styles.helperText}>{dateRule.note}</Text>
+            ) : null}
+            <Text style={styles.helperText}>
+              {isFaculty
+                ? 'Sundays are non-working days and cannot be selected.'
+                : 'Saturdays and Sundays are non-working days and cannot be selected.'}
             </Text>
-          </TouchableOpacity>
-        </View>
+            {startDate && endDate && dateRule.maxDurationDays ? (
+              <Text style={styles.helperText}>
+                {countedDays}/{dateRule.maxDurationDays} {durationUnit} days used
+              </Text>
+            ) : null}
+            {isWeekendOnlyRange ? (
+              <Text style={styles.warningText}>Selected dates fall on non-working days — no working days in this range</Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Working Days */}
-        <View style={styles.field}>
-          <Text style={styles.label}>Number of Working Days *</Text>
-          <RNTextInput
-            style={[styles.input, { color: daysCount ? PRIMARY : '#aaa' }]}
-            placeholder="Auto-calculated from dates"
-            placeholderTextColor="#aaa"
-            value={daysCount ? `${daysCount} day(s)` : ''}
-            editable={false}
-          />
-        </View>
+        {leaveType ? (
+          <View style={styles.field}>
+            <Text style={styles.label}>Number of Working Days *</Text>
+            <RNTextInput
+              style={[styles.input, { color: daysCount ? PRIMARY : '#aaa' }]}
+              placeholder="Auto-calculated from dates"
+              placeholderTextColor="#aaa"
+              value={daysCount ? `${daysCount} day(s)` : ''}
+              editable={false}
+            />
+          </View>
+        ) : null}
 
         {/* Reason */}
         <View style={styles.field}>
@@ -470,7 +904,18 @@ export default function ApplyLeaveScreen({ navigation }: any) {
 
         {/* Monetization */}
         <View style={styles.field}>
-          <TouchableOpacity style={styles.checkRow} onPress={() => setMonetizeCredits(!monetizeCredits)} disabled={loading}>
+          <TouchableOpacity
+            style={styles.checkRow}
+            onPress={() => {
+              const next = !monetizeCredits;
+              setMonetizeCredits(next);
+              if (!next) {
+                setMonetizationVlDays('');
+                setMonetizationSlDays('');
+              }
+            }}
+            disabled={loading}
+          >
             <View style={[styles.checkbox, monetizeCredits && styles.checkboxChecked]}>
               {monetizeCredits && <Feather name="check" size={12} color="#fff" />}
             </View>
@@ -483,36 +928,70 @@ export default function ApplyLeaveScreen({ navigation }: any) {
                 Monetization of leave credits is subject to availability of funds and approval by the agency head.
               </Text>
 
-              <Text style={[styles.label, { marginTop: 12 }]}>Number of Days to Monetize</Text>
-              <RNTextInput
-                style={styles.input}
-                keyboardType="number-pad"
-                value={monetizeDays}
-                onChangeText={setMonetizeDays}
-                editable={!loading}
-              />
-              {maxMonetizable !== null && (
-                <Text style={styles.helperText}>Maximum monetizable: {maxMonetizable} vacation leave days</Text>
-              )}
-
-              <View style={styles.monetizeSummary}>
-                <View style={styles.monetizeSummaryRow}>
-                  <Text style={styles.monetizeSummaryLabel}>Daily Rate:</Text>
-                  <Text style={styles.monetizeSummaryValue}>₱{DAILY_RATE.toLocaleString()}</Text>
+              <View style={styles.monetizeRow}>
+                <View style={styles.monetizeCol}>
+                  <Text style={styles.label}>Vacation Leave (VL) days</Text>
+                  <RNTextInput
+                    style={styles.input}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor="#aaa"
+                    value={monetizationVlDays}
+                    onChangeText={setMonetizationVlDays}
+                    editable={!loading}
+                  />
+                  <Text style={styles.helperText}>
+                    Maximum: {balanceVl !== null ? balanceVl.toFixed(2) : '0.00'} VL days
+                  </Text>
                 </View>
-                <View style={styles.monetizeSummaryRow}>
-                  <Text style={styles.monetizeSummaryLabel}>Days:</Text>
-                  <Text style={styles.monetizeSummaryValue}>{monetizeDaysNum}</Text>
+                <View style={styles.monetizeCol}>
+                  <Text style={styles.label}>Sick Leave (SL) days</Text>
+                  <RNTextInput
+                    style={styles.input}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor="#aaa"
+                    value={monetizationSlDays}
+                    onChangeText={setMonetizationSlDays}
+                    editable={!loading}
+                  />
+                  <Text style={styles.helperText}>
+                    Maximum: {balanceSl !== null ? balanceSl.toFixed(2) : '0.00'} SL days
+                  </Text>
                 </View>
-                <View style={[styles.monetizeSummaryRow, styles.monetizeSummaryTotalRow]}>
-                  <Text style={styles.monetizeSummaryTotalLabel}>Estimated Amount:</Text>
-                  <Text style={styles.monetizeSummaryTotalValue}>₱{estimatedAmount.toLocaleString()}</Text>
-                </View>
-                <Text style={styles.monetizeCalcText}>
-                  Calculation: {monetizeDaysNum} days × ₱{DAILY_RATE} = ₱{estimatedAmount.toLocaleString()}
-                </Text>
-                <Text style={styles.helperText}>*Subject to final computation and fund availability</Text>
               </View>
+
+              {totalMonetizationDays > 0 && (
+                <View style={styles.monetizeSummary}>
+                  <View style={styles.monetizeSummaryRow}>
+                    <Text style={styles.monetizeSummaryLabel}>Salary / Month:</Text>
+                    <Text style={styles.monetizeSummaryValue}>
+                      {hasSalaryData ? formatPeso(monthlySalary as number) : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.monetizeSummaryRow}>
+                    <Text style={styles.monetizeSummaryLabel}>Days (VL {vlDays} + SL {slDays}):</Text>
+                    <Text style={styles.monetizeSummaryValue}>{totalMonetizationDays}</Text>
+                  </View>
+                  <View style={styles.monetizeSummaryRow}>
+                    <Text style={styles.monetizeSummaryLabel}>Constant Factor (CF):</Text>
+                    <Text style={styles.monetizeSummaryValue}>{MONETIZATION_CF}</Text>
+                  </View>
+                  <View style={[styles.monetizeSummaryRow, styles.monetizeSummaryTotalRow]}>
+                    <Text style={styles.monetizeSummaryTotalLabel}>Estimated Amount:</Text>
+                    <Text style={styles.monetizeSummaryTotalValue}>{formatPeso(estimatedAmount)}</Text>
+                  </View>
+                  <Text style={styles.monetizeCalcText}>
+                    Formula: Salary × No. of days × CF = {hasSalaryData ? formatPeso(monthlySalary as number) : '—'} × {totalMonetizationDays} × {MONETIZATION_CF}
+                  </Text>
+                  <Text style={styles.helperText}>*Subject to final computation and fund availability</Text>
+                  {!hasSalaryData && (
+                    <Text style={styles.warningText}>
+                      Your monthly salary is not on file yet, so no estimate can be shown. HR will compute the final amount.
+                    </Text>
+                  )}
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -521,9 +1000,22 @@ export default function ApplyLeaveScreen({ navigation }: any) {
         <View style={styles.field}>
           <Text style={styles.label}>Attachment (Optional)</Text>
           <Text style={styles.helperText}>Attach proof documents e.g. medical certificate, clearance · {attachments.length}/5 files</Text>
-          <TouchableOpacity style={styles.uploadBox} onPress={handlePickFiles} disabled={loading || attachments.length >= 5}>
-            <Text style={{ fontWeight: '600', color: '#444' }}>Click to open File</Text>
-            <Text style={styles.helperText}>Select from your album</Text>
+          <TouchableOpacity
+            style={[styles.uploadBox, compressing && { opacity: 0.6 }]}
+            onPress={handlePickFiles}
+            disabled={loading || compressing || attachments.length >= 5}
+          >
+            {compressing ? (
+              <>
+                <ActivityIndicator color={PRIMARY} size="small" />
+                <Text style={[styles.helperText, { marginTop: 6 }]}>Compressing photo(s)…</Text>
+              </>
+            ) : (
+              <>
+                <Text style={{ fontWeight: '600', color: '#444' }}>Click to open File</Text>
+                <Text style={styles.helperText}>Select from your album</Text>
+              </>
+            )}
           </TouchableOpacity>
           {attachments.length > 0 && (
             <View style={styles.previewGrid}>
@@ -534,6 +1026,9 @@ export default function ApplyLeaveScreen({ navigation }: any) {
                     <Feather name="x" size={10} color="#fff" />
                   </TouchableOpacity>
                   <Text style={styles.previewName} numberOfLines={1}>{file.name}</Text>
+                  {file.size > 0 && (
+                    <Text style={styles.previewSize}>{(file.size / 1024 / 1024).toFixed(2)} MB</Text>
+                  )}
                 </View>
               ))}
             </View>
@@ -570,13 +1065,16 @@ const styles = StyleSheet.create({
   groupLabel: { fontSize: 11, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5 },
   dropdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
   dropdownItemSelected: { backgroundColor: `${PRIMARY}08` },
+  dropdownItemTextRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flex: 1, gap: 8 },
   dropdownItemText: { fontSize: 15, color: '#374151' },
   dropdownItemTextSelected: { color: PRIMARY, fontWeight: '600' },
+  dropdownItemDuration: { fontSize: 11, color: '#9CA3AF', flexShrink: 0 },
   card: { backgroundColor: '#fff', borderRadius: 14, margin: 16, padding: 20, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 20 },
   field: { marginBottom: 18 },
   label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 8 },
   helperText: { fontSize: 11, color: '#9CA3AF', marginTop: 4 },
+  warningText: { fontSize: 11, color: '#DC2626', marginTop: 4, fontWeight: '600' },
   dropdownTrigger: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1.5, borderColor: PRIMARY, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 14, backgroundColor: '#FEF2F2' },
   dropdownTriggerText: { fontSize: 15, color: '#1a1a1a', fontWeight: '500' },
   otherBox: { backgroundColor: '#EFF6FF', borderRadius: 10, padding: 14, marginBottom: 18, borderWidth: 1, borderColor: '#BFDBFE' },
@@ -591,6 +1089,7 @@ const styles = StyleSheet.create({
   calendarRangeItem: { alignItems: 'center', minWidth: 90 },
   calendarRangeLabel: { fontSize: 11, color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', marginBottom: 2 },
   calendarRangeValue: { fontSize: 14, color: PRIMARY, fontWeight: '700' },
+  calendarRuleNote: { fontSize: 11, color: '#9CA3AF', marginTop: 10, marginHorizontal: 16, textAlign: 'center' },
   calendarActions: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginTop: 14 },
   calendarClearBtn: { flex: 1, borderWidth: 1.5, borderColor: BORDER, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
   calendarClearText: { color: '#6B7280', fontWeight: '600', fontSize: 14 },
@@ -607,10 +1106,12 @@ const styles = StyleSheet.create({
   checkboxChecked: { backgroundColor: PRIMARY, borderColor: PRIMARY },
   checkLabel: { fontSize: 14, color: '#374151', flex: 1 },
   monetizeBox: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 12, padding: 14, marginTop: 12 },
-  monetizeNotice: { fontSize: 12, color: '#92400E' },
+  monetizeNotice: { fontSize: 12, color: '#92400E', marginBottom: 12 },
+  monetizeRow: { flexDirection: 'row', gap: 12 },
+  monetizeCol: { flex: 1 },
   monetizeSummary: { backgroundColor: '#FDF1E7', borderRadius: 10, padding: 14, marginTop: 14 },
   monetizeSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  monetizeSummaryLabel: { fontSize: 13, color: '#6B7280' },
+  monetizeSummaryLabel: { fontSize: 13, color: '#6B7280', flexShrink: 1, paddingRight: 8 },
   monetizeSummaryValue: { fontSize: 13, color: '#1a1a1a', fontWeight: '600' },
   monetizeSummaryTotalRow: { borderTopWidth: 1, borderTopColor: '#E5D5C5', paddingTop: 8, marginTop: 4, marginBottom: 4 },
   monetizeSummaryTotalLabel: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
@@ -623,6 +1124,7 @@ const styles = StyleSheet.create({
   removeBtn: { position: 'absolute', top: -6, right: -6, backgroundColor: '#EF4444', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
   removeBtnText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
   previewName: { fontSize: 10, color: '#666', marginTop: 4, textAlign: 'center' },
+  previewSize: { fontSize: 9, color: '#9CA3AF', textAlign: 'center' },
   submitBtn: { backgroundColor: PRIMARY, borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   submitText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   infoCard: { backgroundColor: '#F9FAFB', borderRadius: 14, margin: 16, marginTop: 0, padding: 16, borderWidth: 1, borderColor: BORDER },

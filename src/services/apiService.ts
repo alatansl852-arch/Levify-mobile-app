@@ -43,6 +43,8 @@ export interface LeaveApplication {
   };
   created_at: string;
   updated_at: string;
+  // Raw attachment rows, if the backend includes them in the leave details response.
+  attachments?: any[];
 }
 
 export interface Notification {
@@ -88,6 +90,9 @@ export interface UserProfile {
   employment_type: string;
   role: string;
   salary_grade: string;
+  // Highest salary received (the 'S' in the monetization formula).
+  // Optional — only present if the backend profile endpoint returns it.
+  monthly_salary?: number | string | null;
   total_leave_credits: number;
   total_leave_availed: number;
   leave_balances: {
@@ -98,6 +103,37 @@ export interface UserProfile {
     total_used: number;
   };
 }
+
+// ── ATTACHMENTS ────────────────────────────────────────────────────────────────
+export interface AttachmentFile {
+  id: number | string;
+  name: string;
+  path: string;
+  size: number;
+  type: string;
+}
+
+/** Full URL of an uploaded file (the backend serves /uploads/... as static files). */
+export const getFileUrl = (filePath: string): string => {
+  if (/^https?:\/\//i.test(filePath)) return filePath;
+  const normalized = (filePath || '').replace(/\\/g, '/');
+  return `${BASE_URL}/${normalized.replace(/^\//, '')}`;
+};
+
+// The web and mobile endpoints don't name attachment fields the same way, so
+// accept both (file_name / name, file_path / path / url, ...).
+const normalizeAttachment = (raw: any): AttachmentFile | null => {
+  if (!raw) return null;
+  const path = raw.file_path ?? raw.path ?? raw.url ?? '';
+  if (!path) return null;
+  return {
+    id: raw.id ?? path,
+    name: raw.file_name ?? raw.name ?? 'Attachment',
+    path,
+    size: Number(raw.file_size ?? raw.size) || 0,
+    type: raw.file_type ?? raw.type ?? raw.mimeType ?? '',
+  };
+};
 
 // ── AUTH API ───────────────────────────────────────────────────────────────────
 export const authAPI = {
@@ -141,6 +177,26 @@ export const profileAPI = {
     });
     return handleResponse(res);
   },
+
+  // Highest salary received, used for the monetization estimate. Same endpoint
+  // the web Apply Leave page uses. Returns null (never throws) if it can't be
+  // loaded, so the form still works and just shows "no estimate".
+  getMonthlySalary: async (employeeId?: string): Promise<number | null> => {
+    if (!employeeId) return null;
+    try {
+      const res = await fetch(`${BASE_URL}/api/leave/salary/${employeeId}`, {
+        headers: await authHeaders(),
+      });
+      const data = await res.json();
+      if (res.ok && data?.success && data.monthly_salary) {
+        const n = Number(data.monthly_salary);
+        return n > 0 ? n : null;
+      }
+    } catch (error) {
+      console.log('Could not load monthly salary:', error);
+    }
+    return null;
+  },
 };
 
 // ── LEAVE REQUEST API ──────────────────────────────────────────────────────────
@@ -160,6 +216,27 @@ export const leaveRequestAPI = {
     return handleResponse(res);
   },
 
+  // Attachments of one application. Uses the rows already included in the
+  // leave details response when there are any; otherwise falls back to the
+  // same endpoint the web HR page uses. Never throws — returns [] on failure.
+  getAttachments: async (id: number, inline?: any[]): Promise<AttachmentFile[]> => {
+    if (Array.isArray(inline) && inline.length > 0) {
+      return inline.map(normalizeAttachment).filter(Boolean) as AttachmentFile[];
+    }
+    try {
+      const res = await fetch(`${BASE_URL}/api/leave/details/${id}`, {
+        headers: await authHeaders(),
+      });
+      const data = await res.json();
+      if (res.ok && data?.success && Array.isArray(data.attachments)) {
+        return data.attachments.map(normalizeAttachment).filter(Boolean) as AttachmentFile[];
+      }
+    } catch (error) {
+      console.log('Could not load attachments:', error);
+    }
+    return [];
+  },
+
   applyLeave: async (payload: {
     leave_type: string;
     date_from: string;
@@ -167,7 +244,11 @@ export const leaveRequestAPI = {
     days_count: number;
     reason?: string;
     monetize_credits?: boolean;
+    // Total days to monetize (VL + SL). Kept for backward compatibility.
     monetize_days?: number;
+    // VL and SL days to monetize are sent separately (MSU splits them).
+    monetization_vl_days?: number;
+    monetization_sl_days?: number;
     commutation_requested?: boolean;
     attachments?: { uri: string; name: string; type: string }[];
   }) => {
@@ -180,6 +261,8 @@ export const leaveRequestAPI = {
     formData.append('reason',      payload.reason || '');
     formData.append('monetize_credits', String(payload.monetize_credits ?? false));
     formData.append('monetize_days', String(payload.monetize_days ?? 0));
+    formData.append('monetization_vl_days', String(payload.monetization_vl_days ?? 0));
+    formData.append('monetization_sl_days', String(payload.monetization_sl_days ?? 0));
     formData.append('commutation_requested', String(payload.commutation_requested ?? false));
 
     if (payload.attachments) {
