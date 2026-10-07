@@ -451,7 +451,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'], // MediaTypeOptions is deprecated/removed in newer expo-image-picker (SDK 52+)
         allowsMultipleSelection: true,
         quality: 1, // grab full quality here — we compress ourselves right after
         selectionLimit: 5 - attachments.length,
