@@ -68,7 +68,7 @@ export default function ProfileScreen() {
         <View style={styles.headerLine} />
       </View>
 
-      {/* ── Avatar & basic info ── */}
+      {/* ── Avatar & role — just identity, no fields (those live in the card below) ── */}
       <View style={styles.card}>
         <View style={styles.avatarBox}>
           <View style={styles.avatar}>
@@ -80,41 +80,23 @@ export default function ProfileScreen() {
             <Text style={styles.roleBadgeText}>{getRoleLabel(profile.role)}</Text>
           </View>
         </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.contactRow}>
-          <Text style={styles.contactLabel}>Email:</Text>
-          <Text style={styles.contactValue}>{profile.email}</Text>
-        </View>
-        <View style={styles.contactRow}>
-          <Text style={styles.contactLabel}>Unit:</Text>
-          <Text style={styles.contactValue}>{profile.department}</Text>
-        </View>
-        <View style={styles.contactRow}>
-          <Text style={styles.contactLabel}>Employee ID:</Text>
-          <Text style={styles.contactValue}>{profile.employee_id}</Text>
-        </View>
       </View>
 
-      {/* ── Personal Information ── */}
+      {/* ── Profile Information — plain rows, not boxed inputs (nothing here is editable) ── */}
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Personal Information</Text>
+        <Text style={styles.sectionTitle}>Profile Information</Text>
 
         {[
-          { label: 'Full Name',        value: profile.name            },
-          { label: 'Email Address',    value: profile.email           },
-          { label: 'Employee ID',      value: profile.employee_id     },
-          { label: 'Unit / Department',value: profile.department      },
-          { label: 'Position',         value: profile.position        },
-          { label: 'Status',           value: profile.employment_type },
-          { label: 'Salary Grade',     value: profile.salary_grade || 'N/A' },
+          { label: 'Email',        value: profile.email           },
+          { label: 'Employee ID',  value: profile.employee_id     },
+          { label: 'Department',   value: profile.department      },
+          { label: 'Position',     value: profile.position        },
+          { label: 'Status',       value: profile.employment_type },
+          { label: 'Salary Grade', value: profile.salary_grade ? `SG-${profile.salary_grade}` : 'N/A' },
         ].map((item, i) => (
-          <View key={i} style={styles.infoItem}>
+          <View key={i} style={styles.infoRow}>
             <Text style={styles.infoLabel}>{item.label}</Text>
-            <View style={styles.infoValueBox}>
-              <Text style={styles.infoValue}>{item.value ?? '—'}</Text>
-            </View>
+            <Text style={styles.infoValue} numberOfLines={1}>{item.value ?? '—'}</Text>
           </View>
         ))}
 
@@ -161,18 +143,17 @@ const styles = StyleSheet.create({
   roleBadge:       { marginTop: 8, backgroundColor: 'rgba(124,45,58,0.1)', paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20 },
   roleBadgeText:   { fontSize: 12, fontWeight: '700', color: PRIMARY },
 
-  divider:      { height: 1, backgroundColor: '#F0F0F0', marginVertical: 16 },
-  contactRow:   { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  contactLabel: { fontSize: 13, color: '#888', width: 90 },
-  contactValue: { fontSize: 13, color: '#1a1a1a', flex: 1 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 10 },
 
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 16 },
-  infoItem:     { marginBottom: 14 },
-  infoLabel:    { fontSize: 12, color: '#888', marginBottom: 4 },
-  infoValueBox: { backgroundColor: '#F5F5F5', borderRadius: 8, padding: 12 },
-  infoValue:    { fontSize: 14, color: '#1a1a1a' },
-  noteBox:      { backgroundColor: '#F5F5F5', borderRadius: 8, padding: 12, marginTop: 8 },
-  noteText:     { fontSize: 12, color: '#888', lineHeight: 18 },
+  infoRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F5F5F5',
+  },
+  infoLabel: { fontSize: 13, color: '#888' },
+  infoValue: { fontSize: 13, color: '#1a1a1a', fontWeight: '600', flexShrink: 1, marginLeft: 12, textAlign: 'right' },
+
+  noteBox:  { backgroundColor: '#F5F5F5', borderRadius: 8, padding: 12, marginTop: 12 },
+  noteText: { fontSize: 12, color: '#888', lineHeight: 18 },
 
   logoutBtn:  { backgroundColor: PRIMARY, margin: 16, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
   logoutText: { color: '#fff', fontWeight: '700', fontSize: 16 },

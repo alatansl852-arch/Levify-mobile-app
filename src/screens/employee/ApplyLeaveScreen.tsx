@@ -304,10 +304,8 @@ export default function ApplyLeaveScreen({ navigation }: any) {
   const [compressing, setCompressing] = useState(false);
 
   // --- Calendar picker state ---
-  const [calendarVisible, setCalendarVisible] = useState(false);
-  // Draft values so the user can cancel without affecting the saved dates
-  const [draftStart, setDraftStart] = useState('');
-  const [draftEnd, setDraftEnd] = useState('');
+  // Which date field the calendar modal is picking for (null = closed).
+  const [pickerTarget, setPickerTarget] = useState<'start' | 'end' | null>(null);
 
   // Faculty have Friday/Saturday classes, so Saturday counts as a working day for them.
   // The backend may label them 'faculty' or 'teaching'.
@@ -406,102 +404,39 @@ export default function ApplyLeaveScreen({ navigation }: any) {
     setDropdownVisible(false);
   };
 
-  // --- Calendar picker handlers ---
-  const openCalendar = () => {
-    setDraftStart(startDate);
-    setDraftEnd(endDate);
-    setCalendarVisible(true);
+  // --- Calendar picker handlers (one date at a time, same as the web app) ---
+  const openStartPicker = () => setPickerTarget('start');
+  const openEndPicker = () => setPickerTarget('end');
+  const closePicker = () => setPickerTarget(null);
+
+  // When the start date changes, drop the end date if it no longer fits
+  // (before the new start, or beyond the max duration for this leave type).
+  const handleStartDateChange = (value: string) => {
+    setStartDate(value);
+    if (endDate) {
+      const newMaxEnd = getMaxEndDate(value);
+      if (endDate < value || (newMaxEnd && endDate > newMaxEnd)) {
+        setEndDate('');
+      }
+    }
   };
 
   const handleDayPress = (day: DateData) => {
-    const dateStr = day.dateString;
-    // Start a fresh selection if none picked yet, or if a full range is
-    // already picked (tapping again starts over).
-    if (!draftStart || (draftStart && draftEnd)) {
-      setDraftStart(dateStr);
-      setDraftEnd('');
-      return;
+    if (pickerTarget === 'start') {
+      handleStartDateChange(day.dateString);
+    } else if (pickerTarget === 'end') {
+      setEndDate(day.dateString);
     }
-    // We have a start but no end yet
-    if (dateStr < draftStart) {
-      // Tapped an earlier date — treat it as the new start
-      setDraftStart(dateStr);
-      setDraftEnd('');
-    } else {
-      setDraftEnd(dateStr);
-    }
+    closePicker();
   };
 
   const getMarkedDates = () => {
     const marks: Record<string, any> = {};
-    if (draftStart && !draftEnd) {
-      marks[draftStart] = {
-        startingDay: true,
-        endingDay: true,
-        color: PRIMARY,
-        textColor: '#fff',
-      };
-    } else if (draftStart && draftEnd) {
-      const current = parseLocalDate(draftStart);
-      const end = parseLocalDate(draftEnd);
-      while (current <= end) {
-        const dateStr = toDateString(current);
-        marks[dateStr] = {
-          color: PRIMARY,
-          textColor: '#fff',
-          startingDay: dateStr === draftStart,
-          endingDay: dateStr === draftEnd,
-        };
-        current.setDate(current.getDate() + 1);
-      }
+    const selected = pickerTarget === 'start' ? startDate : pickerTarget === 'end' ? endDate : '';
+    if (selected) {
+      marks[selected] = { selected: true, selectedColor: PRIMARY, selectedTextColor: '#fff' };
     }
     return marks;
-  };
-
-  const handleClearCalendar = () => {
-    setDraftStart('');
-    setDraftEnd('');
-  };
-
-  const handleConfirmCalendar = () => {
-    if (!draftStart) {
-      Toast.show({ type: 'error', text1: 'Missing Date', text2: 'Please select a start date' });
-      return;
-    }
-
-    // CSC advance-notice check (skip for leave types filed upon/after return)
-    if (!dateRule.allowRetroactive && minStartDate && draftStart < minStartDate) {
-      Toast.show({
-        type: 'error',
-        text1: 'Advance Notice Required',
-        text2: dateRule.minAdvanceDays
-          ? `${leaveType} must be filed at least ${dateRule.minAdvanceDays} day(s) before the start date.`
-          : `${leaveType} cannot be backdated.`,
-      });
-      return;
-    }
-
-    const finalEnd = draftEnd || draftStart;
-    const draftCalendarDays = Math.round(
-      (parseLocalDate(finalEnd).getTime() - parseLocalDate(draftStart).getTime()) / 86400000
-    ) + 1;
-    const draftCounted = dateRule.maxInWorkingDays
-      ? calculateWorkingDays(draftStart, finalEnd, isFaculty)
-      : draftCalendarDays;
-
-    // CSC max-duration check
-    if (dateRule.maxDurationDays && draftCounted > dateRule.maxDurationDays) {
-      Toast.show({
-        type: 'error',
-        text1: 'Duration Exceeds Limit',
-        text2: `${leaveType} is limited to ${dateRule.maxDurationDays} ${dateRule.maxInWorkingDays ? 'working ' : ''}day(s). You selected ${draftCounted}.`,
-      });
-      return;
-    }
-
-    setStartDate(draftStart);
-    setEndDate(finalEnd);
-    setCalendarVisible(false);
   };
 
   const handlePickFiles = async () => {
@@ -639,7 +574,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
 
       const response = await leaveRequestAPI.applyLeave({
         leave_type: finalLeaveType,
-        leave_location: leaveType === 'Vacation Leave' ? leaveLocation : undefined,
+        leave_location: leaveLocation,
         date_from: startDate,
         date_to: endDate,
         days_count: numberOfDays,
@@ -679,11 +614,15 @@ export default function ApplyLeaveScreen({ navigation }: any) {
     }
   };
 
-  // Calendar's own bounds. Sundays (and Saturdays for staff) can't be tapped.
-  // `maxDate` narrows once a start date is drafted, since the max duration
-  // counts from whichever start the user picks.
-  const calendarMinDate = minStartDate || undefined;
-  const calendarMaxDate = draftStart && !draftEnd ? getMaxEndDate(draftStart) : undefined;
+  // Calendar bounds for whichever field is open. Sundays (and Saturdays for staff) can't be tapped.
+  // The End Date can't be before the Start Date, and is capped by the leave type's max duration.
+  const minEndDate = startDate || minStartDate;
+  const maxEndDate = getMaxEndDate(startDate);
+  const calendarMinDate = pickerTarget === 'end' ? minEndDate : minStartDate;
+  const calendarMaxDate = pickerTarget === 'end' ? maxEndDate : undefined;
+  const calendarCurrent = pickerTarget === 'end'
+    ? (endDate || startDate || minStartDate)
+    : (startDate || minStartDate);
   const disabledDaysIndexes = isFaculty ? [0] : [0, 6];
 
   return (
@@ -727,27 +666,15 @@ export default function ApplyLeaveScreen({ navigation }: any) {
         </TouchableOpacity>
       </Modal>
 
-      {/* Calendar Date Range Modal */}
-      <Modal visible={calendarVisible} transparent animationType="fade" onRequestClose={() => setCalendarVisible(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCalendarVisible(false)}>
+      {/* Calendar Modal — picks one date at a time (Start Date or End Date), same as the web app */}
+      <Modal visible={pickerTarget !== null} transparent animationType="fade" onRequestClose={closePicker}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={closePicker}>
           <TouchableOpacity activeOpacity={1} style={styles.calendarModalBox} onPress={(e) => e.stopPropagation()}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Leave Dates</Text>
-              <TouchableOpacity onPress={() => setCalendarVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.modalTitle}>{pickerTarget === 'end' ? 'Select End Date' : 'Select Start Date'}</Text>
+              <TouchableOpacity onPress={closePicker} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Feather name="x" size={20} color="#666" />
               </TouchableOpacity>
-            </View>
-
-            <View style={styles.calendarRangeSummary}>
-              <View style={styles.calendarRangeItem}>
-                <Text style={styles.calendarRangeLabel}>Start</Text>
-                <Text style={styles.calendarRangeValue}>{draftStart ? prettyDate(draftStart) : '—'}</Text>
-              </View>
-              <Feather name="arrow-right" size={16} color="#9CA3AF" />
-              <View style={styles.calendarRangeItem}>
-                <Text style={styles.calendarRangeLabel}>End</Text>
-                <Text style={styles.calendarRangeValue}>{draftEnd ? prettyDate(draftEnd) : '—'}</Text>
-              </View>
             </View>
 
             {dateRule.note ? (
@@ -760,13 +687,12 @@ export default function ApplyLeaveScreen({ navigation }: any) {
             </Text>
 
             <Calendar
-              current={draftStart || minStartDate || undefined}
+              current={calendarCurrent || undefined}
               minDate={calendarMinDate}
               maxDate={calendarMaxDate}
               disabledDaysIndexes={disabledDaysIndexes}
               disableAllTouchEventsForDisabledDays
               onDayPress={handleDayPress}
-              markingType="period"
               markedDates={getMarkedDates()}
               theme={{
                 todayTextColor: PRIMARY,
@@ -778,15 +704,6 @@ export default function ApplyLeaveScreen({ navigation }: any) {
               }}
               style={styles.calendar}
             />
-
-            <View style={styles.calendarActions}>
-              <TouchableOpacity style={styles.calendarClearBtn} onPress={handleClearCalendar}>
-                <Text style={styles.calendarClearText}>Clear</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.calendarConfirmBtn} onPress={handleConfirmCalendar}>
-                <Text style={styles.calendarConfirmText}>Confirm Dates</Text>
-              </TouchableOpacity>
-            </View>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -845,19 +762,41 @@ export default function ApplyLeaveScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* Inclusive Dates — only shown once a leave type has been picked,
-            since the rules (min advance days, max duration) depend on it. */}
+        {/* Inclusive Dates — Start Date and End Date as two separate fields (same as the web app).
+            Only shown once a leave type has been picked, since the rules depend on it. */}
         {leaveType ? (
           <View style={styles.field}>
             <Text style={styles.label}>Inclusive Dates *</Text>
-            <TouchableOpacity style={styles.dateTrigger} onPress={openCalendar} disabled={loading}>
-              <Feather name="calendar" size={18} color={PRIMARY} />
-              <Text style={[styles.dateTriggerText, !startDate && { color: '#aaa' }]}>
-                {startDate && endDate
-                  ? `${prettyDate(startDate)}  →  ${prettyDate(endDate)}`
-                  : 'Select start and end date'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.dateRow}>
+              <View style={styles.dateCol}>
+                <Text style={styles.dateSubLabel}>Start Date</Text>
+                <TouchableOpacity style={styles.dateTrigger} onPress={openStartPicker} disabled={loading}>
+                  <Feather name="calendar" size={16} color={PRIMARY} />
+                  <Text
+                    style={[styles.dateTriggerText, !startDate && { color: '#aaa' }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    {startDate ? prettyDate(startDate) : 'Pick a date'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.dateCol}>
+                <Text style={styles.dateSubLabel}>End Date</Text>
+                <TouchableOpacity style={styles.dateTrigger} onPress={openEndPicker} disabled={loading}>
+                  <Feather name="calendar" size={16} color={PRIMARY} />
+                  <Text
+                    style={[styles.dateTriggerText, !endDate && { color: '#aaa' }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    {endDate ? prettyDate(endDate) : 'Pick a date'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
             {dateRule.note ? (
               <Text style={styles.helperText}>{dateRule.note}</Text>
             ) : null}
@@ -935,7 +874,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
 
               <View style={styles.monetizeRow}>
                 <View style={styles.monetizeCol}>
-                  <Text style={styles.label}>Vacation Leave (VL) days</Text>
+                  <Text style={styles.label} numberOfLines={2}>{'Vacation Leave\n(VL) days'}</Text>
                   <RNTextInput
                     style={styles.input}
                     keyboardType="decimal-pad"
@@ -950,7 +889,7 @@ export default function ApplyLeaveScreen({ navigation }: any) {
                   </Text>
                 </View>
                 <View style={styles.monetizeCol}>
-                  <Text style={styles.label}>Sick Leave (SL) days</Text>
+                  <Text style={styles.label} numberOfLines={2}>{'Sick Leave\n(SL) days'}</Text>
                   <RNTextInput
                     style={styles.input}
                     keyboardType="decimal-pad"
@@ -1086,20 +1025,14 @@ const styles = StyleSheet.create({
   otherInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: BORDER, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#1a1a1a', marginTop: 4 },
   input: { borderWidth: 1.5, borderColor: BORDER, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: '#1a1a1a', backgroundColor: '#fff' },
   textarea: { height: 100, textAlignVertical: 'top' },
-  // Date range trigger (opens calendar modal)
-  dateTrigger: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1.5, borderColor: BORDER, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 14, backgroundColor: '#fff' },
-  dateTriggerText: { fontSize: 15, color: '#1a1a1a', fontWeight: '500' },
+  // Date fields (each opens a single-date calendar modal) — Start Date / End Date side by side, like the web app
+  dateRow: { flexDirection: 'row', gap: 12 },
+  dateCol: { flex: 1 },
+  dateSubLabel: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginBottom: 6 },
+  dateTrigger: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1.5, borderColor: BORDER, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 14, backgroundColor: '#fff' },
+  dateTriggerText: { flex: 1, fontSize: 13, color: '#1a1a1a', fontWeight: '500' },
   calendar: { borderRadius: 12, marginHorizontal: 12 },
-  calendarRangeSummary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, paddingVertical: 14, backgroundColor: '#FEF2F2', marginHorizontal: 16, marginTop: 12, borderRadius: 10 },
-  calendarRangeItem: { alignItems: 'center', minWidth: 90 },
-  calendarRangeLabel: { fontSize: 11, color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', marginBottom: 2 },
-  calendarRangeValue: { fontSize: 14, color: PRIMARY, fontWeight: '700' },
   calendarRuleNote: { fontSize: 11, color: '#9CA3AF', marginTop: 10, marginHorizontal: 16, textAlign: 'center' },
-  calendarActions: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginTop: 14 },
-  calendarClearBtn: { flex: 1, borderWidth: 1.5, borderColor: BORDER, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
-  calendarClearText: { color: '#6B7280', fontWeight: '600', fontSize: 14 },
-  calendarConfirmBtn: { flex: 2, backgroundColor: PRIMARY, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
-  calendarConfirmText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   row: { flexDirection: 'row', gap: 12, marginBottom: 18 },
   radioRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
   radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#D1D5DB', justifyContent: 'center', alignItems: 'center', marginRight: 10 },

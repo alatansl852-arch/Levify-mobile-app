@@ -109,22 +109,11 @@ export default function DashboardScreen({ navigation }: any) {
     );
   }
 
-  const vl              = balance?.vacation          ?? 0;
-  const sl               = balance?.sick              ?? 0;
-  const spl              = balance?.special_privilege ?? 0;
-  const fl               = balance?.forced            ?? 0;
-  const pending          = statistics?.pending        ?? 0;
-  const totalCredits     = profile?.total_leave_credits ?? 0;
-
-  // ✅ SPLIT: used and monetized now separate — falls back gracefully if backend
-  // hasn't been updated yet (total_monetized undefined → treated as 0, and
-  // total_used falls back to the old combined field so nothing breaks).
-  const totalUsed        = statistics?.total_used ?? profile?.total_leave_availed ?? 0;
-  const totalMonetized   = statistics?.total_monetized ?? 0;
-
-  const salaryGrade      = profile?.salary_grade ?? 'N/A';
-  const CARD_W            = (SCREEN_WIDTH - 32 - 12) / 2;
-  const FULL_W             = SCREEN_WIDTH - 32;
+  const vl          = balance?.vacation ?? 0;
+  const sl          = balance?.sick     ?? 0;
+  const pending     = statistics?.pending ?? 0;
+  const totalCredits = profile?.total_leave_credits ?? 0;
+  const CARD_W       = (SCREEN_WIDTH - 32 - 12) / 2;
 
   return (
     <View style={{ flex: 1 }}>
@@ -141,27 +130,14 @@ export default function DashboardScreen({ navigation }: any) {
           </Text>
         </View>
 
-        {/* ── Row 1 ── */}
+        {/* ── Summary — 2x2 grid, everything a person checks day-to-day ── */}
         <View style={styles.row}>
           <StatCard label="VACATION LEAVE" value={vl.toFixed(2)} sub="days available" width={CARD_W} />
           <StatCard label="SICK LEAVE"     value={sl.toFixed(2)} sub="days available" width={CARD_W} />
         </View>
-
-        {/* ── Row 2 ── */}
         <View style={styles.row}>
-          <StatCard label="PENDING REQUESTS" value={String(pending)} sub="awaiting approval" width={FULL_W} accent />
-        </View>
-
-        {/* ── Row 3a — Credits / Salary Grade ── */}
-        <View style={styles.row}>
-          <SmallStatCard label="Total Leave Credits" value={totalCredits.toFixed(2)} sub="lifetime credits" />
-          <SmallStatCard label="Salary Grade"         value={`SG-${salaryGrade}`}    sub="current grade" />
-        </View>
-
-        {/* ── Row 3b — Used / Monetized (split from the old combined card) ── */}
-        <View style={styles.row}>
-          <SmallStatCard label="Total Days Used"      value={totalUsed.toFixed(2)}      sub="regular leave taken"  accent />
-          <SmallStatCard label="Total Days Monetized" value={totalMonetized.toFixed(2)} sub="leave credits"   accent />
+          <StatCard label="TOTAL CREDITS"    value={totalCredits.toFixed(2)} sub="lifetime earned"    width={CARD_W} />
+          <StatCard label="PENDING REQUESTS" value={String(pending)}         sub="awaiting approval"   width={CARD_W} accent />
         </View>
 
         {/* ── Recent Applications ── */}
@@ -199,39 +175,6 @@ export default function DashboardScreen({ navigation }: any) {
               </TouchableOpacity>
             );
           })}
-        </View>
-
-        {/* ── Leave Balance Summary ── */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Leave Balance Summary</Text>
-          <View style={styles.row}>
-            <MiniCard label="Vacation Leave"    value={vl.toFixed(2)}  />
-            <MiniCard label="Sick Leave"        value={sl.toFixed(2)}  />
-          </View>
-          <View style={[styles.row, { marginTop: 10 }]}>
-            <MiniCard label="Special Privilege" value={spl.toFixed(2)} />
-            <MiniCard label="Forced Leave"      value={fl.toFixed(2)}  />
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total Available</Text>
-            <Text style={styles.totalValue}>{(vl + sl + spl + fl).toFixed(2)} days</Text>
-          </View>
-          <View style={styles.subRow}>
-            <Text style={styles.subLabel}>Total Leave Credits (Lifetime)</Text>
-            <Text style={styles.subValue}>{totalCredits.toFixed(2)} days</Text>
-          </View>
-          <View style={styles.subRow}>
-            <Text style={styles.subLabel}>Total Days Used</Text>
-            <Text style={styles.subValue}>{totalUsed.toFixed(2)} days</Text>
-          </View>
-          <View style={styles.subRow}>
-            <Text style={styles.subLabel}>Total Days Monetized</Text>
-            <Text style={styles.subValue}>{totalMonetized.toFixed(2)} days</Text>
-          </View>
-          <View style={styles.subRow}>
-            <Text style={styles.subLabel}>Salary Grade</Text>
-            <Text style={styles.subValue}>SG - {salaryGrade}</Text>
-          </View>
         </View>
 
         <View style={{ height: 100 }} />
@@ -295,28 +238,6 @@ function StatCard({ label, value, sub, width, accent, muted }:
   );
 }
 
-function SmallStatCard({ label, value, sub, accent, muted }:
-  { label: string; value: string; sub: string; accent?: boolean; muted?: boolean }) {
-  const color = muted ? '#6B7280' : PRIMARY;
-  return (
-    <View style={[styles.smallStatCard, { borderLeftColor: color }]}>
-      <Text style={styles.smallStatLabel}>{label}</Text>
-      <Text style={[styles.smallStatValue, { color }]}>{value}</Text>
-      <Text style={styles.smallStatSub}>{sub}</Text>
-    </View>
-  );
-}
-
-function MiniCard({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.miniCard}>
-      <Text style={styles.miniLabel}>{label}</Text>
-      <Text style={styles.miniValue}>{value}</Text>
-      <Text style={styles.miniSub}>days</Text>
-    </View>
-  );
-}
-
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -335,16 +256,8 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
   },
   statLabel: { fontSize: 11, color: '#888', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  statValue: { fontSize: 28, fontWeight: 'bold', marginTop: 4 },
+  statValue: { fontSize: 24, fontWeight: 'bold', marginTop: 4 },
   statSub:   { fontSize: 11, color: '#999', marginTop: 2 },
-
-  smallStatCard: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 10, borderLeftWidth: 3,
-    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
-  },
-  smallStatLabel: { fontSize: 9,  color: '#888', fontWeight: '600', textTransform: 'uppercase' },
-  smallStatValue: { fontSize: 16, fontWeight: 'bold', marginTop: 4 },
-  smallStatSub:   { fontSize: 9,  color: '#999', marginTop: 2 },
 
   card: {
     backgroundColor: '#fff', borderRadius: 14,
@@ -357,18 +270,6 @@ const styles = StyleSheet.create({
   emptyBox: { alignItems: 'center', paddingVertical: 28 },
   appItem:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   badge:    { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
-
-  miniCard:  { flex: 1, borderRadius: 12, padding: 14, backgroundColor: 'rgba(124,45,58,0.07)' },
-  miniLabel: { fontSize: 11, color: PRIMARY },
-  miniValue: { fontSize: 22, fontWeight: 'bold', marginTop: 4, color: PRIMARY },
-  miniSub:   { fontSize: 11, color: 'rgba(124,45,58,0.5)', marginTop: 2 },
-
-  totalRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F0F0F0', marginTop: 14, paddingTop: 14 },
-  totalLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a1a' },
-  totalValue: { fontSize: 16, fontWeight: 'bold', color: PRIMARY },
-  subRow:     { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
-  subLabel:   { fontSize: 12, color: '#888', flex: 1 },
-  subValue:   { fontSize: 12, color: '#444', fontWeight: '600' },
 
   // ── FAB ──
   overlay: {

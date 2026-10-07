@@ -18,6 +18,7 @@ const CARD_WIDTH = (SCREEN_WIDTH - 32 - 10) / 2;
 
 export default function LeaveBalanceScreen() {
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
+  const [totalLeaveCredits, setTotalLeaveCredits] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -37,6 +38,9 @@ export default function LeaveBalanceScreen() {
           total_used: b.total_used,
         });
       }
+      // Lifetime credits are no longer shown as their own card,
+      // but Available is still computed from them.
+      setTotalLeaveCredits(res?.profile?.total_leave_credits ?? 0);
     } catch (e) {
       console.error('Balance load error:', e);
     } finally {
@@ -60,8 +64,8 @@ export default function LeaveBalanceScreen() {
   const sl  = balance?.sick              ?? 0;
   const spl = balance?.special_privilege ?? 0;
   const fl  = balance?.forced            ?? 0;
-  const total = vl + sl + spl + fl;
-  const totalUsed = balance?.total_used  ?? 0;
+  const totalAvailed = balance?.total_used ?? 0;
+  const credits      = totalLeaveCredits   ?? 0;
 
   const leaveTypes = [
     { name: 'Vacation Leave',          sub: 'Earns 1.25 days/month', value: vl,  max: 60 },
@@ -72,12 +76,10 @@ export default function LeaveBalanceScreen() {
 
   const hasOverCap = leaveTypes.some(l => l.value > l.max);
 
-  // ✅ FIXED: Available days = total - totalUsed
+  // 2 cards: Total availed + Available (Available = credits − availed)
   const summaryCards = [
-    { label: 'Total earned days', value: total.toFixed(2)                        },
-    { label: 'Total used days',   value: totalUsed.toFixed(2)                   },
-    { label: 'Available days',    value: (total - totalUsed).toFixed(2), accent: true },
-    { label: 'Monthly accrual',   value: '2.50'                                 },
+    { label: 'Total availed',  value: totalAvailed.toFixed(2)                    },
+    { label: 'Available days', value: (credits - totalAvailed).toFixed(2), accent: true },
   ];
 
   return (
@@ -93,7 +95,7 @@ export default function LeaveBalanceScreen() {
         <View style={styles.maroonHeader}>
           <Text style={styles.headerTitle}>Leave Balance</Text>
 
-          {/* 4 Summary Cards */}
+          {/* 2 Summary Cards */}
           <View style={styles.summaryGrid}>
             {summaryCards.map((card, i) => (
               <View
@@ -141,12 +143,12 @@ export default function LeaveBalanceScreen() {
               Breakdown of your leave credits by type (CSC Omnibus Rules on Leave)
             </Text>
 
-            {/* Legend */}
+            {/* Legend — bars show the current available balance per type */}
             <View style={styles.legend}>
               {[
-                { color: PRIMARY,   label: 'Used'      },
+                { color: PRIMARY,   label: 'Available' },
                 { color: OVER_CAP,  label: 'Over cap'  },
-                { color: '#F0F0F0', label: 'Remaining' },
+                { color: '#F0F0F0', label: 'Room left' },
               ].map((item, i) => (
                 <View key={i} style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: item.color }]} />
@@ -244,7 +246,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
 
-  /* ── 4 Summary Cards ── */
+  /* ── Summary Cards ── */
   summaryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
