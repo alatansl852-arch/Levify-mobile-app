@@ -239,7 +239,7 @@ export const leaveRequestAPI = {
 
   applyLeave: async (payload: {
     leave_type: string;
-    // 'within_ph' | 'abroad' — only sent for Vacation Leave (same as the web app).
+    // 'within_ph' | 'abroad' — sent for every leave type (same as the web app).
     leave_location?: string;
     date_from: string;
     date_to: string;
@@ -281,16 +281,35 @@ export const leaveRequestAPI = {
       });
     }
 
-    const res = await fetch(`${BASE_URL}/api/mobile/apply`, {
-      method: 'POST',
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        // Note: do NOT set 'Content-Type' manually for multipart FormData —
-        // fetch/RN sets the correct boundary automatically.
-      },
-      body: formData,
+    // NOTE: On newer Expo SDKs (53+) the global fetch() rejects React Native's
+    // { uri, name, type } FormData file parts ("Unsupported FormDataPart
+    // implementation"). XMLHttpRequest still supports them, so the multipart
+    // upload goes through XHR. It resolves/rejects exactly like handleResponse().
+    return new Promise<any>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BASE_URL}/api/mobile/apply`);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('Accept', 'application/json');
+      // Do NOT set 'Content-Type' manually — XHR sets the multipart boundary itself.
+      xhr.timeout = 90000; // generous: Render's free tier can take a while to wake up
+      xhr.onload = () => {
+        let data: any = null;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch {
+          reject(new Error(`HTTP ${xhr.status}`));
+          return;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data);
+        } else {
+          reject(new Error(data?.message || `HTTP ${xhr.status}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network request failed. Please check your connection.'));
+      xhr.ontimeout = () => reject(new Error('The request timed out. Please try again.'));
+      xhr.send(formData as any);
     });
-    return handleResponse(res);
   },
 
   cancelLeave: async (id: number) => {
