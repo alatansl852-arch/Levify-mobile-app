@@ -6,12 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/levify-icon-red.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/levify-icon-red.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#5c1a1a"
-    },
     "ios": {
       "supportsTablet": true
     },
@@ -20,7 +14,6 @@
         "foregroundImage": "./assets/levify-icon-red.png",
         "backgroundColor": "#5c1a1a"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.schultz12303.MobileApp"
     },
@@ -40,7 +33,16 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/levify-icon-red.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#5c1a1a"
+        }
+      ]
     ]
   }
 }
