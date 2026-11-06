@@ -24,8 +24,8 @@ export default function LoginScreen({ navigation }: any) {
 
     setLoading(true);
     try {
-      const success = await login(email, password);
-      if (success) {
+      const result = await login(email, password);
+      if (result.success) {
         Toast.show({
           type: 'success',
           text1: 'Login Successful!',
@@ -34,8 +34,8 @@ export default function LoginScreen({ navigation }: any) {
       } else {
         Toast.show({
           type: 'error',
-          text1: 'Login Failed',
-          text2: 'Invalid credentials. Please try again.'
+          text1: result.adminBlocked ? 'Access Denied' : 'Login Failed',
+          text2: result.message || 'Invalid credentials. Please try again.'
         });
       }
     } catch (error) {
@@ -130,7 +130,8 @@ export default function LoginScreen({ navigation }: any) {
                   left={<TextInput.Icon icon="lock" />}
                   right={
                     <TextInput.Icon
-                      icon={showPassword ? 'eye-off' : 'eye'}
+                      // FIXED: password visible -> open eye, password hidden -> eye with slash
+                      icon={showPassword ? 'eye' : 'eye-off'}
                       onPress={() => setShowPassword(!showPassword)}
                     />
                   }

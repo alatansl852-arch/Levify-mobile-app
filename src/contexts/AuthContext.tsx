@@ -3,7 +3,15 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authAPI } from '../services/apiService';
 
-export type UserRole = 'employee' | 'hr' | 'ovcaa' | 'ovcaf';
+export type UserRole = 'employee' | 'faculty' | 'staff' | 'hr' | 'ovcaa' | 'ovcaf';
+
+// Only these roles can use the mobile app. Everyone else (HR, OVCAA, OVCAF, admins) → web only.
+const MOBILE_ALLOWED_ROLES: string[] = ['employee', 'faculty', 'staff'];
+const ADMIN_BLOCK_MESSAGE =
+  'Admin accounts cannot log in on the mobile app. Please use the web portal.';
+
+const isMobileAllowed = (role: string | undefined) =>
+  !!role && MOBILE_ALLOWED_ROLES.includes(role.toLowerCase());
 
 export interface User {
   id: number;
@@ -18,10 +26,16 @@ export interface User {
   salaryGrade?: string;
 }
 
+export interface LoginResult {
+  success: boolean;
+  message?: string;
+  adminBlocked?: boolean;
+}
+
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
   isLoading: boolean;
 }
@@ -36,14 +50,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadUser();
   }, []);
 
+  const clearStorage = async () => {
+    await AsyncStorage.removeItem('userToken');
+    await AsyncStorage.removeItem('levify_user');
+  };
+
   const loadUser = async () => {
     try {
       const savedUser = await AsyncStorage.getItem('levify_user');
-      // ✅ FIXED: read token from 'userToken' (same key apiService uses)
+      // read token from 'userToken' (same key apiService uses)
       const savedToken = await AsyncStorage.getItem('userToken');
 
       if (savedUser && savedToken) {
         const parsedUser = JSON.parse(savedUser);
+
+        // Block any saved admin session
+        if (!isMobileAllowed(parsedUser.role)) {
+          console.log('⛔ Saved session is not allowed on mobile:', parsedUser.role);
+          await clearStorage();
+          return;
+        }
+
         const userData: User = {
           id: parsedUser.id,
           email: parsedUser.email,
@@ -61,20 +88,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error('❌ Error loading saved user:', error);
-      await AsyncStorage.removeItem('levify_user');
-      await AsyncStorage.removeItem('userToken');
+      await clearStorage();
     } finally {
       setIsLoading(false);
     }
   };
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<LoginResult> => {
     setIsLoading(true);
     try {
       console.log('🔵 Attempting login for:', email);
       const response = await authAPI.login(email, password);
 
       if (response.success && response.user && response.token) {
+        // ⛔ Block admins from the mobile app (web only)
+        if (!isMobileAllowed(response.user.role)) {
+          console.log('⛔ Blocked non-employee login on mobile. Role:', response.user.role);
+          // apiService may have already saved the token, so clear everything
+          await clearStorage();
+          setUser(null);
+          setIsLoading(false);
+          return { success: false, adminBlocked: true, message: ADMIN_BLOCK_MESSAGE };
+        }
+
         const userData: User = {
           id: response.user.id,
           email: response.user.email,
@@ -92,30 +128,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setUser(userData);
 
-        // ✅ FIXED: save token as 'userToken' AND save user data
+        // save token as 'userToken' AND save user data
         await AsyncStorage.setItem('userToken', response.token);
         await AsyncStorage.setItem('levify_user', JSON.stringify(response.user));
 
         setIsLoading(false);
-        return true;
+        return { success: true };
       } else {
         console.log('❌ Login failed:', response.message);
         setIsLoading(false);
-        return false;
+        return { success: false, message: response.message };
       }
     } catch (error: any) {
       console.error('❌ Login error:', error);
       setIsLoading(false);
-      return false;
+      return { success: false };
     }
   };
 
   const logout = async () => {
     console.log('👋 Logging out...');
     setUser(null);
-    // ✅ FIXED: remove correct token key
-    await AsyncStorage.removeItem('userToken');
-    await AsyncStorage.removeItem('levify_user');
+    await clearStorage();
     await authAPI.logout();
   };
 
