@@ -16,6 +16,12 @@ const OVER_CAP = '#F59E0B';
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = (SCREEN_WIDTH - 32 - 10) / 2;
 
+// Whole numbers show without decimals (5), real fractions keep 2 decimals (5.50).
+const formatWholeOrDecimal = (n: number): string => {
+  const rounded = Math.round(n * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
+};
+
 export default function LeaveBalanceScreen() {
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [totalLeaveCredits, setTotalLeaveCredits] = useState<number | null>(null);
@@ -78,7 +84,7 @@ export default function LeaveBalanceScreen() {
 
   // 2 cards: Total availed + Available (Available = credits − availed)
   const summaryCards = [
-    { label: 'Total availed',  value: totalAvailed.toFixed(2)                    },
+    { label: 'Total availed',  value: formatWholeOrDecimal(totalAvailed)         },
     { label: 'Available days', value: (credits - totalAvailed).toFixed(2), accent: true },
   ];
 
