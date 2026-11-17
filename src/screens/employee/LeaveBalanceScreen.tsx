@@ -12,18 +12,6 @@ import { Text, ActivityIndicator } from 'react-native-paper';
 import { profileAPI, LeaveBalance } from '../../services/apiService';
 
 const PRIMARY = '#7C2D3A';
-// Lighter maroon for the portion of VL/SL that is beyond the 60-day reference.
-const BEYOND = '#D9B3BA';
-
-// Info (blue) colors for the banner and badge.
-const INFO_BG = '#EAF2FB';
-const INFO_BORDER = '#B5D4F4';
-const INFO_TEXT = '#0C447C';
-
-// LEVIFY reference threshold for VL/SL. This is a system setting,
-// not a forfeiture limit: credits above it stay accumulated.
-const REFERENCE_DAYS = 60;
-
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = (SCREEN_WIDTH - 32 - 10) / 2;
 
@@ -32,6 +20,16 @@ const formatWholeOrDecimal = (n: number): string => {
   const rounded = Math.round(n * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
 };
+
+interface LeaveRow {
+  name: string;
+  sub: string;
+  value: number;
+  // accumulates = VL/SL: credits carry over with no maximum, so no bar is drawn.
+  // Otherwise `max` is the annual limit (Special Privilege 3, Forced 5).
+  accumulates: boolean;
+  max: number;
+}
 
 export default function LeaveBalanceScreen() {
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
@@ -84,15 +82,12 @@ export default function LeaveBalanceScreen() {
   const totalAvailed = balance?.total_used ?? 0;
   const credits      = totalLeaveCredits   ?? 0;
 
-  // accumulates = true for VL/SL (credits carry over, no forfeiture).
-  const leaveTypes = [
-    { name: 'Vacation Leave',          sub: 'Earns 1.25 days/month', value: vl,  max: REFERENCE_DAYS, accumulates: true  },
-    { name: 'Sick Leave',              sub: 'Earns 1.25 days/month', value: sl,  max: REFERENCE_DAYS, accumulates: true  },
-    { name: 'Special Privilege Leave', sub: '3 days per year',        value: spl, max: 3,              accumulates: false },
-    { name: 'Forced Leave',            sub: '5 days per year',        value: fl,  max: 5,              accumulates: false },
+  const leaveTypes: LeaveRow[] = [
+    { name: 'Vacation Leave',          sub: 'Earns 1.25 days/month', value: vl,  accumulates: true,  max: 0 },
+    { name: 'Sick Leave',              sub: 'Earns 1.25 days/month', value: sl,  accumulates: true,  max: 0 },
+    { name: 'Special Privilege Leave', sub: '3 days per year',        value: spl, accumulates: false, max: 3 },
+    { name: 'Forced Leave',            sub: '5 days per year',        value: fl,  accumulates: false, max: 5 },
   ];
-
-  const hasBeyondReference = leaveTypes.some(l => l.accumulates && l.value > l.max);
 
   // 2 cards: Total availed + Available (Available = credits − availed)
   const summaryCards = [
@@ -145,16 +140,6 @@ export default function LeaveBalanceScreen() {
         {/* ── White Content Section ── */}
         <View style={styles.contentWrap}>
 
-          {/* Info banner (beyond 60-day reference) */}
-          {hasBeyondReference && (
-            <View style={styles.infoBox}>
-              <Text style={styles.infoText}>
-                ℹ️  Your leave credits exceed {REFERENCE_DAYS} days. Credits above {REFERENCE_DAYS} days
-                remain accumulated and are not forfeited.
-              </Text>
-            </View>
-          )}
-
           {/* Leave Credits Details */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Leave Credits Details</Text>
@@ -162,26 +147,9 @@ export default function LeaveBalanceScreen() {
               Breakdown of your leave credits by type (CSC Omnibus Rules on Leave)
             </Text>
 
-            {/* Legend — bars show the current available balance per type */}
-            <View style={styles.legend}>
-              {[
-                { color: PRIMARY,   label: 'Available' },
-                { color: BEYOND,    label: `Beyond ${REFERENCE_DAYS} days` },
-                { color: '#F0F0F0', label: 'Room left' },
-              ].map((item, i) => (
-                <View key={i} style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: item.color }]} />
-                  <Text style={styles.legendLabel}>{item.label}</Text>
-                </View>
-              ))}
-            </View>
-
             {leaveTypes.map((leave, i) => {
-              const isBeyond  = leave.accumulates && leave.value > leave.max;
-              const isFull    = !isBeyond && leave.value === leave.max;
-              const pct       = Math.min((leave.value / leave.max) * 100, 100);
-              const basePct   = isBeyond ? (leave.max / leave.value) * 100 : pct;
-              const beyondAmt = isBeyond ? (leave.value - leave.max).toFixed(2) : null;
+              const isFull = !leave.accumulates && leave.value >= leave.max;
+              const pct    = leave.accumulates ? 0 : Math.min((leave.value / leave.max) * 100, 100);
 
               return (
                 <View key={i} style={styles.leaveItem}>
@@ -189,11 +157,6 @@ export default function LeaveBalanceScreen() {
                     <View style={{ flex: 1 }}>
                       <View style={styles.leaveNameRow}>
                         <Text style={styles.leaveName}>{leave.name}</Text>
-                        {isBeyond && (
-                          <View style={styles.badgeBeyond}>
-                            <Text style={styles.badgeBeyondText}>Beyond {REFERENCE_DAYS} days</Text>
-                          </View>
-                        )}
                         {isFull && (
                           <View style={styles.badgeFull}>
                             <Text style={styles.badgeFullText}>Full</Text>
@@ -210,46 +173,21 @@ export default function LeaveBalanceScreen() {
                     </View>
                   </View>
 
-                  <View style={styles.progressBg}>
-                    {isBeyond ? (
-                      <View style={{ flexDirection: 'row', height: '100%' }}>
-                        <View style={[styles.progressFill, {
-                          width: `${basePct}%`,
-                          backgroundColor: PRIMARY,
-                          borderTopRightRadius: 0,
-                          borderBottomRightRadius: 0,
-                        }]} />
-                        <View style={[styles.progressFill, {
-                          flex: 1,
-                          backgroundColor: BEYOND,
-                          borderTopLeftRadius: 0,
-                          borderBottomLeftRadius: 0,
-                        }]} />
+                  {/* Progress bar — only for leave types with an annual limit */}
+                  {!leave.accumulates && (
+                    <>
+                      <View style={styles.progressBg}>
+                        <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: PRIMARY }]} />
                       </View>
-                    ) : (
-                      <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: PRIMARY }]} />
-                    )}
-                  </View>
-
-                  {isBeyond ? (
-                    <View style={styles.beyondRow}>
-                      <View style={styles.beyondLegendItem}>
-                        <View style={[styles.beyondDot, { backgroundColor: PRIMARY }]} />
-                        <Text style={styles.beyondText}>{leave.max}-day reference</Text>
-                      </View>
-                      <View style={styles.beyondLegendItem}>
-                        <View style={[styles.beyondDot, { backgroundColor: BEYOND }]} />
-                        <Text style={styles.beyondText}>{beyondAmt} accumulated</Text>
-                      </View>
-                    </View>
-                  ) : (
-                    <Text style={styles.pctText}>{pct.toFixed(0)}% of {leave.max} days</Text>
+                      <Text style={styles.pctText}>{pct.toFixed(0)}% of {leave.max} days</Text>
+                    </>
                   )}
                 </View>
               );
             })}
 
             <Text style={styles.noteText}>
+              Vacation and sick leave credits are cumulative and carry over each year.
               Monetization is subject to CSC rules and agency approval.
             </Text>
           </View>
@@ -333,18 +271,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  /* ── Info banner ── */
-  infoBox: {
-    marginHorizontal: 16,
-    marginBottom: 4,
-    backgroundColor: INFO_BG,
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 0.5,
-    borderColor: INFO_BORDER,
-  },
-  infoText: { fontSize: 12, color: INFO_TEXT, lineHeight: 18 },
-
   /* ── Card ── */
   card: {
     backgroundColor: '#fff',
@@ -358,13 +284,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   cardTitle: { fontSize: 16, fontWeight: 'bold', color: PRIMARY, marginBottom: 4 },
-  cardSub:   { fontSize: 12, color: '#888', marginBottom: 12 },
-
-  /* ── Legend ── */
-  legend:     { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 16 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  legendDot:  { width: 10, height: 10, borderRadius: 2, borderWidth: 1, borderColor: '#ddd' },
-  legendLabel:{ fontSize: 11, color: '#888' },
+  cardSub:   { fontSize: 12, color: '#888', marginBottom: 16 },
 
   /* ── Leave Items ── */
   leaveItem:   { marginBottom: 20 },
@@ -375,19 +295,12 @@ const styles = StyleSheet.create({
   leaveValue:  { fontSize: 20, fontWeight: 'bold', color: PRIMARY },
   leaveMax:    { fontSize: 11, color: '#aaa' },
 
-  badgeBeyond:     { backgroundColor: INFO_BG, borderRadius: 20, paddingHorizontal: 7, paddingVertical: 2 },
-  badgeBeyondText: { fontSize: 10, color: INFO_TEXT, fontWeight: '600' },
-  badgeFull:       { backgroundColor: '#D1FAE5', borderRadius: 20, paddingHorizontal: 7, paddingVertical: 2 },
-  badgeFullText:   { fontSize: 10, color: '#065F46', fontWeight: '600' },
+  badgeFull:     { backgroundColor: '#D1FAE5', borderRadius: 20, paddingHorizontal: 7, paddingVertical: 2 },
+  badgeFullText: { fontSize: 10, color: '#065F46', fontWeight: '600' },
 
   progressBg:   { height: 8, backgroundColor: '#F0F0F0', borderRadius: 4, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 4 },
   pctText:      { fontSize: 10, color: '#aaa', marginTop: 3, textAlign: 'right' },
 
-  beyondRow:        { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  beyondLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  beyondDot:        { width: 8, height: 8, borderRadius: 2 },
-  beyondText:       { fontSize: 10, color: '#888' },
-
-  noteText: { fontSize: 11, color: '#888', marginTop: 4 },
+  noteText: { fontSize: 11, color: '#888', marginTop: 4, lineHeight: 16 },
 });
